@@ -11,7 +11,7 @@ document.querySelector("button").onclick = async function() {
       console.log(box)
       for (let i = 1; i < box.length; i++) {
         imageElement = document.createElement('img'); 
-        imageElement.src = box[0] + box[i] + ".png"; 
+        imageElement.src = box[0] + box[i]; 
         console.log(imageElement.src)
         imageElement.width="400";
         imageElement.height="400";

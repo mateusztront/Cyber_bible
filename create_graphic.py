@@ -12,6 +12,7 @@ import os
 def draw_text():
 
     today = date.today()
+    today = '2024-01-12'
 
     URL = f"https://liturgia.wiara.pl/kalendarz/67b53.Czytania-mszalne/{str(today)}"
 
@@ -128,7 +129,7 @@ def draw_text():
                 x_word_intended = 2 * size_x_left
                 words = line.split(" ")
                 words_length = sum(draw.textlength(w, font=fnt) for w in words)
-                if len(words)==1:
+                if len(words) == 1:
                     words.append(' ')
 
                 if line_count == len(lines)-1:
@@ -305,7 +306,6 @@ def draw_text():
         return returned
 
 # def readings_creation():
-    font_size = 36
     min_font_before_pagination = 29
     verse_break = 6
     pagination_font_size = 28
@@ -314,10 +314,17 @@ def draw_text():
     for text in content_dic.keys():
     # ['PIERWSZE CZYTANIE']:
         if text != 'PSALM RESPONSORYJNY':
-   
+            font_size = 38
             returned = draw_text(out, text, current_path, size_x_left, size_y, font_size)
+            print(returned['drawn_y'])
+            print(returned['drawn_y'] < (image_size - 20))
+            if returned['drawn_y'] <= (image_size - 20):
+                returned['picture'].show()
+                returned['picture'].save(current_path + f'{text}.png')
+                posts_list.append(f'{text}.png')
 
             while returned['drawn_y'] > image_size - 20:
+               
                 if font_size < min_font_before_pagination:
                     pagination_dic = {}
                     pagination_dic[f'{text} cz.1'] = content_dic[f'{text}'][:verse_break]
@@ -325,27 +332,27 @@ def draw_text():
                     pagination_dic[f'{text} cz.2'] = content_dic[f'{text}'][verse_break:]
                     
                     returned = draw_text_pagination_first(out, pagination_dic[f'{text} cz.1'], current_path, size_x_left, size_y, pagination_font_size)
-                    returned['picture'].show()
+                    # returned['picture'].show()
                     returned['picture'].save(current_path + f'{text}1.png')
+                    posts_list.append(f'{text}1.png')
 
                     returned = draw_text_pagination_second(out,  pagination_dic[f'{text} cz.2'], current_path, size_x_left, size_y, pagination_font_size)
-                    returned['picture'].show()
+                    # returned['picture'].show()
                     returned['picture'].save(current_path + f'{text}2.png')
-
-                    
+                    posts_list.append(f'{text}2.png')
 
                     break
-                
+
                 else:
                     font_size -= 1
                     returned = draw_text(out, text, current_path, size_x_left, size_y, font_size)
-            
-            # print('font_size: ', font_size)
-            returned['picture'].show()
-            returned['picture'].save(current_path + f'{text}.png')
-            
 
-    font_size_psalm = 30
+            else:
+                # returned['picture'].show()
+                returned['picture'].save(current_path + f'{text}.png')
+                posts_list.append(f'{text}.png')
+            
+    font_size_psalm = 36
     font_size_small_psalm = int(0.75 * font_size_psalm)
 
     tahoma = r"C:\Windows\Fonts\tahoma.ttf"
@@ -414,11 +421,12 @@ def draw_text():
             draw.text((x_distance*2, y_text), element, font=fnt_psalm, fill="black", anchor='lm')
         y_text += y_distance
 
-    out_psalm.show()
+    # out_psalm.show()
     out_psalm.save(current_path + 'PSALM RESPONSORYJNY.png')
+    posts_list.append('PSALM RESPONSORYJNY.png')
+    print(posts_list)
     
-    
-    box = ['/' + str(today) + '/', *content_dic.keys()]
+    box = ['/' + str(today) + '/', *posts_list]
     return box
    
 if __name__=="__main__":
