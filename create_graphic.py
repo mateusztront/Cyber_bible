@@ -12,7 +12,7 @@ import os
 def draw_text():
 
     today = date.today()
-    today = '2024-01-12'
+    # today = '2024-01-15'
 
     URL = f"https://liturgia.wiara.pl/kalendarz/67b53.Czytania-mszalne/{str(today)}"
 
@@ -308,7 +308,7 @@ def draw_text():
 # def readings_creation():
     min_font_before_pagination = 29
     verse_break = 6
-    pagination_font_size = 28
+    pagination_font_size = 32
 
     posts_list = []
     for text in content_dic.keys():
@@ -319,7 +319,7 @@ def draw_text():
             print(returned['drawn_y'])
             print(returned['drawn_y'] < (image_size - 20))
             if returned['drawn_y'] <= (image_size - 20):
-                returned['picture'].show()
+                # returned['picture'].show()
                 returned['picture'].save(current_path + f'{text}.png')
                 posts_list.append(f'{text}.png')
 
@@ -352,7 +352,7 @@ def draw_text():
                 returned['picture'].save(current_path + f'{text}.png')
                 posts_list.append(f'{text}.png')
             
-    font_size_psalm = 36
+    font_size_psalm = 34
     font_size_small_psalm = int(0.75 * font_size_psalm)
 
     tahoma = r"C:\Windows\Fonts\tahoma.ttf"
@@ -390,7 +390,7 @@ def draw_text():
     y_text = y_further_distance*4
     for count, element in enumerate(content_dic["PSALM RESPONSORYJNY"][2:]):
 
-        if "Refren" in element :
+        if "Refren" in element:
             y_text += y_further_distance
             draw.text((x_distance, y_text), "Refren: ", font=fnt_b_psalm, fill="red", anchor='lm')
             draw.text((x_distance*3, y_text), content_dic["PSALM RESPONSORYJNY"][1][7:], font=fnt_b_psalm, fill="black", anchor='lm')
@@ -428,6 +428,27 @@ def draw_text():
     
     box = ['/' + str(today) + '/', *posts_list]
     return box
+
+@eel.expose
+def readings_eng():
+    today = date.today()
+    URL = f"https://www.vaticannews.va/en/word-of-the-day/{str(today).replace('-', '/')}.html"
+    page = requests.get(URL)
+    soup = BeautifulSoup(page.content, "html.parser")
+    content_list = soup.find_all("div", "section__content")[:2]
+    content_list_text = [x.get_text().split('\n') for x in content_list]
+    for num, y in enumerate(content_list_text):
+        content_list_text[num] = [x.replace("\"","") for x in y]
+    return content_list_text
+
+@eel.expose
+def readings_pol():
+    today = date.today()
+    URL = f"https://liturgia.wiara.pl/kalendarz/67b53.Czytania-mszalne/{str(today)}"
+    page = requests.get(URL)
+    soup = BeautifulSoup(page.content, "html.parser")
+    content_list = soup.find_all("div", "txt__rich-area")[1].get_text().split('\n')
+    return content_list[3:]
    
 if __name__=="__main__":
     draw_text()

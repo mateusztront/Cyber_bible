@@ -11,7 +11,7 @@ from pathlib import Path, PureWindowsPath, WindowsPath
 from datetime import date
 import os
 
-from create_graphic import draw_text 
+from create_graphic import draw_text, readings_eng, readings_pol
 # from create_graphic import draw_text  
 eel.init("web")   
   
