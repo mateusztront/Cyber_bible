@@ -7,12 +7,13 @@ import textwrap
 from pathlib import WindowsPath
 from datetime import date
 import os
+from functools import reduce
 
 @eel.expose
 def draw_text():
 
     today = date.today()
-    # today = '2024-01-15'
+    # today = '2024-01-29'
 
     URL = f"https://liturgia.wiara.pl/kalendarz/67b53.Czytania-mszalne/{str(today)}"
 
@@ -40,8 +41,14 @@ def draw_text():
         if text in cut_points:
 
             for text in content_list[content_list.index(text)+1:]:
-                if '' == text:
+                if text == '':
                     continue
+                if text == 'albo':
+                    content_dic[cut_points[0]] = staging_list
+                    staging_list = [] 
+                    del cut_points[0]
+                    break    
+
                 if text not in cut_points:
                     staging_list.append(text)
                     
@@ -54,17 +61,18 @@ def draw_text():
             content_dic[cut_points[0]] = staging_list
 
     content_dic 
-
+    
 
     if 'EWANGELIA KRÓTSZA' in content_list:
         content_dic['EWANGELIA KRÓTSZA'].insert(1, content_dic['EWANGELIA DŁUŻSZA'][1])
         content_dic['EWANGELIA KRÓTSZA']
 
-
-    # content_dic['PSALM RESPONSORYJNY'].insert(6, 'Refren')
-    # content_dic['PSALM RESPONSORYJNY'].insert(11, 'Refren')
-    # content_dic['PSALM RESPONSORYJNY'].insert(16, 'Refren')
-    content_dic['PSALM RESPONSORYJNY']
+    count = reduce(lambda x, y: x + 1 if 'Refren' in y else x, content_dic['PSALM RESPONSORYJNY'], 0)
+    if len(content_dic['PSALM RESPONSORYJNY']) > 6 and count == 1:
+        content_dic['PSALM RESPONSORYJNY'].insert(6, 'Refren')
+        content_dic['PSALM RESPONSORYJNY'].insert(11, 'Refren')
+        # content_dic['PSALM RESPONSORYJNY'].insert(16, 'Refren')
+    # content_dic['PSALM RESPONSORYJNY']
 
     path = r"C:\Users\Acne\Pictures\Cyfrowa Biblia\automatyzacja\paper.gif"
 
@@ -113,6 +121,7 @@ def draw_text():
         var_y = size_x_left + size_y
         draw.text((size_x_left, var_y), content_dic[name][1], font=fnt_s, fill="black", anchor='lm')
         
+        #TODO initial indent
         lines = textwrap.wrap(content_dic[name][2], width=width)
         for line in lines:
             var_y += size_y
@@ -258,7 +267,7 @@ def draw_text():
         draw = ImageDraw.Draw(out_func) 
 
         var_y = size_x_left
-        
+        print(reading_list)
         lines = textwrap.wrap(reading_list[0], width=width)
         
         for count, element in enumerate(reading_list[0:-1]):
@@ -307,11 +316,12 @@ def draw_text():
 
 # def readings_creation():
     min_font_before_pagination = 29
-    verse_break = 6
-    pagination_font_size = 32
+    verse_break = 5
+    pagination_font_size = 34
 
     posts_list = []
     for text in content_dic.keys():
+    # .keys():
     # ['PIERWSZE CZYTANIE']:
         if text != 'PSALM RESPONSORYJNY':
             font_size = 38
@@ -366,7 +376,7 @@ def draw_text():
     # content_dic["PSALM RESPONSORYJNY"].insert(16, 'Refren')
     content_dic["PSALM RESPONSORYJNY"]
 
-    if len(content_dic["PSALM RESPONSORYJNY"][0]) > 35:
+    if len(content_dic["PSALM RESPONSORYJNY"][0]) > 30:
         content_dic["PSALM RESPONSORYJNY"][0] = content_dic["PSALM RESPONSORYJNY"][0].split(',')[0]
         
     # del content_dic["PSALM RESPONSORYJNY"][-2]
@@ -379,15 +389,15 @@ def draw_text():
     draw = ImageDraw.Draw(out_psalm) 
 
     y_distance = font_size_psalm * 0.95
-    y_further_distance = font_size_psalm * 1.1
+    y_further_distance = font_size_psalm * 0.7
     x_distance = font_size_psalm * 2
 
     draw.text((x_distance, y_further_distance*2), "PSALM RESPONSORYJNY", font=fnt_b_psalm, fill="red", anchor='lm')
     draw.text((1000, y_further_distance*2), content_dic["PSALM RESPONSORYJNY"][0], font=fnt_b_psalm, fill="red", anchor='rm')
-    draw.text((x_distance, y_further_distance*3), "Refren: ", font=fnt_b_psalm, fill="red", anchor='lm')
-    draw.text((x_distance*3, y_further_distance*3), content_dic["PSALM RESPONSORYJNY"][1][7:], font=fnt_b_psalm, fill="black", anchor='lm')
+    draw.text((x_distance, y_further_distance*4), "Refren: ", font=fnt_b_psalm, fill="red", anchor='lm')
+    draw.text((x_distance*3, y_further_distance*4), content_dic["PSALM RESPONSORYJNY"][1][7:], font=fnt_b_psalm, fill="black", anchor='lm')
 
-    y_text = y_further_distance*4
+    y_text = y_further_distance*6
     for count, element in enumerate(content_dic["PSALM RESPONSORYJNY"][2:]):
 
         if "Refren" in element:
@@ -402,14 +412,14 @@ def draw_text():
             # print(acclamation)
             draw.text((x_distance, y_text), "AKLAMACJA PRZED EWANGELIĄ", font=fnt_b_psalm, fill="red", anchor='lm')
             draw.text((1000, y_text), acclamation[1], font=fnt_b_psalm, fill="red", anchor='rm')
-            draw.text((x_distance, y_text+y_further_distance), "Aklamacja: ", font=fnt_b_psalm, fill="red", anchor='lm')
-            draw.text((x_distance*4, y_text+y_further_distance), acclamation[2][10:], font=fnt_b_psalm, fill="black", anchor='lm')
-            draw.text((x_distance*2, y_text+y_further_distance*2), acclamation[3], font=fnt_psalm, fill="black", anchor='lm')
-            draw.text((x_distance*2, y_text+y_further_distance*2+y_distance), acclamation[4], font=fnt_psalm, fill="black", anchor='lm')
+            draw.text((x_distance, y_text+y_further_distance*2), "Aklamacja: ", font=fnt_b_psalm, fill="red", anchor='lm')
+            draw.text((x_distance*4, y_text+y_further_distance*2), acclamation[2][10:], font=fnt_b_psalm, fill="black", anchor='lm')
+            draw.text((x_distance*2, y_text+y_further_distance*4), acclamation[3], font=fnt_psalm, fill="black", anchor='lm')
+            draw.text((x_distance*2, y_text+y_further_distance*4+y_distance), acclamation[4], font=fnt_psalm, fill="black", anchor='lm')
             # draw.text((x_distance*2, y_text+y_further_distance*3+y_distance), acclamation[5], font=fnt_psalm, fill="black", anchor='lm')
 
-            draw.text((x_distance, y_text+y_further_distance*3+y_distance), "Aklamacja: ", font=fnt_b_psalm, fill="red", anchor='lm') 
-            draw.text((x_distance*4, y_text+y_further_distance*3+y_distance), acclamation[5][10:], font=fnt_b_psalm, fill="black", anchor='lm')
+            draw.text((x_distance, y_text+y_further_distance*6+y_distance), "Aklamacja: ", font=fnt_b_psalm, fill="red", anchor='lm') 
+            draw.text((x_distance*4, y_text+y_further_distance*6+y_distance), acclamation[5][10:], font=fnt_b_psalm, fill="black", anchor='lm')
 
             break  
 
@@ -432,6 +442,7 @@ def draw_text():
 @eel.expose
 def readings_eng():
     today = date.today()
+    # today = '2024-01-29'
     URL = f"https://www.vaticannews.va/en/word-of-the-day/{str(today).replace('-', '/')}.html"
     page = requests.get(URL)
     soup = BeautifulSoup(page.content, "html.parser")
@@ -444,6 +455,7 @@ def readings_eng():
 @eel.expose
 def readings_pol():
     today = date.today()
+    # today = '2024-01-29'
     URL = f"https://liturgia.wiara.pl/kalendarz/67b53.Czytania-mszalne/{str(today)}"
     page = requests.get(URL)
     soup = BeautifulSoup(page.content, "html.parser")
