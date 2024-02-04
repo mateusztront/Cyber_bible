@@ -1,12 +1,11 @@
-
-
+// let thedate = document.querySelector("#input_date").value;
+ 
 // Onclick of the button 
 document.querySelector(".posts").onclick = async function() {   
-  // TODO loop for each readings and pass list of reading to this loop
-      // Call python's random_python function 
-      const box = await eel.draw_text()();
+      var thedate = document.getElementById('input_date').value;
+      const box = await eel.draw_text(thedate)();
       // eel.draw_text()(path => console.log('Got this from Python: ' + path));
-      // console.log(path);                    
+      // console.log($("#input_date").val());                    
       // !!!!!!!!!!!! add retured graphic to the html 
       console.log(box)
       for (let i = 1; i < box.length; i++) {
@@ -20,9 +19,8 @@ document.querySelector(".posts").onclick = async function() {
       }
 
 document.querySelector(".english_readings").onclick = async function() {   
-  // TODO loop for each readings and pass list of reading to this loop
-      // Call python's random_python function 
-      const content_list_text = await eel.readings_eng()();
+      var thedate = document.getElementById('input_date').value;
+      const content_list_text = await eel.readings_eng(thedate)();
       // eel.draw_text()(path => console.log('Got this from Python: ' + path));
       // console.log(path);                    
       // !!!!!!!!!!!! add retured graphic to the html 
@@ -36,9 +34,8 @@ document.querySelector(".english_readings").onclick = async function() {
       }
 
 document.querySelector(".polish_readings").onclick = async function() {   
-  // TODO loop for each readings and pass list of reading to this loop
-      // Call python's random_python function 
-      const content_list_text = await eel.readings_pol()();
+      var thedate = document.getElementById('input_date').value;
+      const content_list_text = await eel.readings_pol(thedate)();
       // eel.draw_text()(path => console.log('Got this from Python: ' + path));
       // console.log(path);                    
       // !!!!!!!!!!!! add retured graphic to the html 
@@ -50,3 +47,8 @@ document.querySelector(".polish_readings").onclick = async function() {
         document.body.appendChild(newDiv);     
         }
       }
+
+const d = new Date();
+let date_text = d.toLocaleDateString('en-CA');
+document.getElementById("input_date").value = date_text;
+

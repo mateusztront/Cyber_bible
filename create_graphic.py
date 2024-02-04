@@ -10,10 +10,11 @@ import os
 from functools import reduce
 
 @eel.expose
-def draw_text():
+def draw_text(thedate):
 
-    today = date.today()
+    # today = date.today()
     # today = '2024-01-29'
+    today = thedate 
 
     URL = f"https://liturgia.wiara.pl/kalendarz/67b53.Czytania-mszalne/{str(today)}"
 
@@ -110,7 +111,8 @@ def draw_text():
         size_x_left = int(25/12 * font_size)
         size_x_right = image_size - 2 * size_x_left  
         size_y = int(1.2 * font_size)
-        width = int(80 - 0.325 * size_x_left)
+        # width = int(80 - 0.325 * size_x_left)
+        width = int(75 - 0.6 * font_size)
 
         out_func = copy.deepcopy(out)
         draw = ImageDraw.Draw(out_func) 
@@ -121,8 +123,8 @@ def draw_text():
         var_y = size_x_left + size_y
         draw.text((size_x_left, var_y), content_dic[name][1], font=fnt_s, fill="black", anchor='lm')
         
-        #TODO initial indent
-        lines = textwrap.wrap(content_dic[name][2], width=width)
+        lines = textwrap.wrap(content_dic[name][2], width=width, initial_indent='    ')
+        lines[0] = lines[0].strip()
         for line in lines:
             var_y += size_y
             draw.text((size_x_left, var_y), line, font=fnt_b, fill="black", anchor='lm')
@@ -130,7 +132,8 @@ def draw_text():
         var_y += size_x_left
         
         for count, element in enumerate(content_dic[name][3:-1]):
-            lines = textwrap.wrap(content_dic[name][3+count], width=width)
+            lines = textwrap.wrap(content_dic[name][3+count], width=width, initial_indent='    ')
+            lines[0] = lines[0].strip()
             space_length_regular = 15
 
             for line_count, line in enumerate(lines):
@@ -142,6 +145,8 @@ def draw_text():
                     words.append(' ')
 
                 if line_count == len(lines)-1:
+                    if words_length + (len(words)-1) * space_length_regular > size_x_right:
+                        space_length_regular = (size_x_right - words_length) / (len(words) - 1)
                     for word in words:
                         draw.text((x_word, var_y), word, font=fnt, fill="black", anchor='lm')
                         x_word += draw.textlength(word, font=fnt) + space_length_regular
@@ -187,7 +192,8 @@ def draw_text():
         size_x_left = int(25/12 * font_size)
         size_x_right = image_size - 2 * size_x_left
         size_y = int(1.2 * font_size)
-        width = int(80 - 0.35 * size_x_left)
+        # width = int(80 - 0.35 * size_x_left)
+        width = int(75 - 0.6 * font_size)
 
         out_func = copy.deepcopy(out)
         draw = ImageDraw.Draw(out_func) 
@@ -199,7 +205,8 @@ def draw_text():
         var_y = size_x_left + size_y
         draw.text((size_x_left, var_y), reading_list[2], font=fnt_s, fill="black", anchor='lm')
         
-        lines = textwrap.wrap(reading_list[3], width=width)
+        lines = textwrap.wrap(reading_list[3], width=width, initial_indent='    ')
+        lines[0] = lines[0].strip()
         for line in lines:
             var_y += size_y
             draw.text((size_x_left, var_y), line, font=fnt_b, fill="black", anchor='lm')
@@ -207,7 +214,8 @@ def draw_text():
         var_y += size_x_left
         
         for count, element in enumerate(reading_list[4:]):
-            lines = textwrap.wrap(reading_list[4+count], width=width)
+            lines = textwrap.wrap(reading_list[4+count], width=width, initial_indent='    ')
+            lines[0] = lines[0].strip()
             space_length_regular = 15
 
             for line_count, line in enumerate(lines):
@@ -225,6 +233,8 @@ def draw_text():
                     break
 
                 if line_count == len(lines)-1:
+                    if words_length + (len(words)-1) * space_length_regular > size_x_right:
+                        space_length_regular = (size_x_right - words_length) / (len(words) - 1)
                     for word in words:
                         draw.text((x_word, var_y), word, font=fnt, fill="black", anchor='lm')
                         x_word += draw.textlength(word, font=fnt) + space_length_regular
@@ -261,17 +271,20 @@ def draw_text():
         size_x_left = int(25/12 * font_size)
         size_x_right = image_size - 2 * size_x_left
         size_y = int(1.2 * font_size)
-        width = int(80 - 0.35 * size_x_left)
+        # width = int(80 - 0.35 * size_x_left)
+        width = int(75 - 0.6 * font_size)
 
         out_func = copy.deepcopy(out)
         draw = ImageDraw.Draw(out_func) 
 
         var_y = size_x_left
         print(reading_list)
-        lines = textwrap.wrap(reading_list[0], width=width)
+        lines = textwrap.wrap(reading_list[0], width=width, initial_indent='    ')
+        lines[0] = lines[0].strip()
         
         for count, element in enumerate(reading_list[0:-1]):
-            lines = textwrap.wrap(reading_list[0+count], width=width)
+            lines = textwrap.wrap(reading_list[0+count], width=width, initial_indent='    ')
+            lines[0] = lines[0].strip()
             space_length_regular = 15
 
             for line_count, line in enumerate(lines):
@@ -289,6 +302,8 @@ def draw_text():
                     break
 
                 if line_count == len(lines)-1:
+                    if words_length + (len(words)-1) * space_length_regular > size_x_right:
+                        space_length_regular = (size_x_right - words_length) / (len(words) - 1)
                     for word in words:
                         draw.text((x_word, var_y), word, font=fnt, fill="black", anchor='lm')
                         x_word += draw.textlength(word, font=fnt) + space_length_regular
@@ -324,10 +339,10 @@ def draw_text():
     # .keys():
     # ['PIERWSZE CZYTANIE']:
         if text != 'PSALM RESPONSORYJNY':
-            font_size = 38
+            font_size = 43
             returned = draw_text(out, text, current_path, size_x_left, size_y, font_size)
-            print(returned['drawn_y'])
-            print(returned['drawn_y'] < (image_size - 20))
+            # print(returned['drawn_y'])
+            # print(returned['drawn_y'] < (image_size - 20))
             if returned['drawn_y'] <= (image_size - 20):
                 # returned['picture'].show()
                 returned['picture'].save(current_path + f'{text}.png')
@@ -440,9 +455,10 @@ def draw_text():
     return box
 
 @eel.expose
-def readings_eng():
-    today = date.today()
+def readings_eng(thedate):
+    # today = date.today()
     # today = '2024-01-29'
+    today = thedate
     URL = f"https://www.vaticannews.va/en/word-of-the-day/{str(today).replace('-', '/')}.html"
     page = requests.get(URL)
     soup = BeautifulSoup(page.content, "html.parser")
@@ -453,9 +469,11 @@ def readings_eng():
     return content_list_text
 
 @eel.expose
-def readings_pol():
-    today = date.today()
+def readings_pol(thedate):
+    # today = date.today()
     # today = '2024-01-29'
+    today = thedate
+    print(today)
     URL = f"https://liturgia.wiara.pl/kalendarz/67b53.Czytania-mszalne/{str(today)}"
     page = requests.get(URL)
     soup = BeautifulSoup(page.content, "html.parser")
