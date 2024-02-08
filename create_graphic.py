@@ -10,12 +10,12 @@ import os
 from functools import reduce
 
 @eel.expose
-def draw_text(thedate):
+def draw_text(thedate, verse_break):
 
     # today = date.today()
     # today = '2024-01-29'
     today = thedate 
-
+    verse_break = int(verse_break)
     URL = f"https://liturgia.wiara.pl/kalendarz/67b53.Czytania-mszalne/{str(today)}"
 
 
@@ -331,7 +331,6 @@ def draw_text(thedate):
 
 # def readings_creation():
     min_font_before_pagination = 29
-    verse_break = 5
     pagination_font_size = 34
 
     posts_list = []

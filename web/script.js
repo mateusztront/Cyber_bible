@@ -3,7 +3,9 @@
 // Onclick of the button 
 document.querySelector(".posts").onclick = async function() {   
       var thedate = document.getElementById('input_date').value;
-      const box = await eel.draw_text(thedate)();
+      var verse_break = document.getElementById('verse_break').value;
+      console.log(verse_break);
+      const box = await eel.draw_text(thedate, verse_break)();
       // eel.draw_text()(path => console.log('Got this from Python: ' + path));
       // console.log($("#input_date").val());                    
       // !!!!!!!!!!!! add retured graphic to the html 
