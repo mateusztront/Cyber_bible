@@ -112,7 +112,7 @@ def draw_text(thedate, verse_break):
         size_x_right = image_size - 2 * size_x_left  
         size_y = int(1.2 * font_size)
         # width = int(80 - 0.325 * size_x_left)
-        width = int(75 - 0.6 * font_size)
+        width = (30 + 0.45 * font_size)
 
         out_func = copy.deepcopy(out)
         draw = ImageDraw.Draw(out_func) 
@@ -123,7 +123,7 @@ def draw_text(thedate, verse_break):
         var_y = size_x_left + size_y
         draw.text((size_x_left, var_y), content_dic[name][1], font=fnt_s, fill="black", anchor='lm')
         
-        lines = textwrap.wrap(content_dic[name][2], width=width, initial_indent='    ')
+        lines = textwrap.wrap(content_dic[name][2], width=width, initial_indent='     ')
         lines[0] = lines[0].strip()
         for line in lines:
             var_y += size_y
@@ -132,7 +132,7 @@ def draw_text(thedate, verse_break):
         var_y += size_x_left
         
         for count, element in enumerate(content_dic[name][3:-1]):
-            lines = textwrap.wrap(content_dic[name][3+count], width=width, initial_indent='    ')
+            lines = textwrap.wrap(content_dic[name][3+count], width=width, initial_indent='     ')
             lines[0] = lines[0].strip()
             space_length_regular = 15
 
@@ -193,7 +193,7 @@ def draw_text(thedate, verse_break):
         size_x_right = image_size - 2 * size_x_left
         size_y = int(1.2 * font_size)
         # width = int(80 - 0.35 * size_x_left)
-        width = int(75 - 0.6 * font_size)
+        width = (30 + 0.45 * font_size)
 
         out_func = copy.deepcopy(out)
         draw = ImageDraw.Draw(out_func) 
@@ -205,7 +205,7 @@ def draw_text(thedate, verse_break):
         var_y = size_x_left + size_y
         draw.text((size_x_left, var_y), reading_list[2], font=fnt_s, fill="black", anchor='lm')
         
-        lines = textwrap.wrap(reading_list[3], width=width, initial_indent='    ')
+        lines = textwrap.wrap(reading_list[3], width=width, initial_indent='     ')
         lines[0] = lines[0].strip()
         for line in lines:
             var_y += size_y
@@ -214,7 +214,7 @@ def draw_text(thedate, verse_break):
         var_y += size_x_left
         
         for count, element in enumerate(reading_list[4:]):
-            lines = textwrap.wrap(reading_list[4+count], width=width, initial_indent='    ')
+            lines = textwrap.wrap(reading_list[4+count], width=width, initial_indent='     ')
             lines[0] = lines[0].strip()
             space_length_regular = 15
 
@@ -272,18 +272,18 @@ def draw_text(thedate, verse_break):
         size_x_right = image_size - 2 * size_x_left
         size_y = int(1.2 * font_size)
         # width = int(80 - 0.35 * size_x_left)
-        width = int(75 - 0.6 * font_size)
+        width = (30 + 0.45 * font_size)
 
         out_func = copy.deepcopy(out)
         draw = ImageDraw.Draw(out_func) 
 
         var_y = size_x_left
         print(reading_list)
-        lines = textwrap.wrap(reading_list[0], width=width, initial_indent='    ')
+        lines = textwrap.wrap(reading_list[0], width=width, initial_indent='     ')
         lines[0] = lines[0].strip()
         
         for count, element in enumerate(reading_list[0:-1]):
-            lines = textwrap.wrap(reading_list[0+count], width=width, initial_indent='    ')
+            lines = textwrap.wrap(reading_list[0+count], width=width, initial_indent='     ')
             lines[0] = lines[0].strip()
             space_length_regular = 15
 
@@ -330,8 +330,8 @@ def draw_text(thedate, verse_break):
         return returned
 
 # def readings_creation():
-    min_font_before_pagination = 29
-    pagination_font_size = 34
+    min_font_before_pagination = 30
+    pagination_font_size = 38
 
     posts_list = []
     for text in content_dic.keys():
