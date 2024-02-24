@@ -3,21 +3,14 @@ import requests
 from bs4 import BeautifulSoup
 from PIL import Image, ImageDraw, ImageFont
 import copy
-import textwrap
-from pathlib import WindowsPath
-from datetime import date
 import os
 from functools import reduce
+from draw_posts import draw_text, draw_text_pagination_first, draw_text_pagination_second
 
 @eel.expose
-def draw_text(thedate, verse_break):
-
-    # today = date.today()
-    # today = '2024-01-29'
-    today = thedate 
+def draw_post(thedate, verse_break):
     verse_break = int(verse_break)
-    URL = f"https://liturgia.wiara.pl/kalendarz/67b53.Czytania-mszalne/{str(today)}"
-
+    URL = f"https://liturgia.wiara.pl/kalendarz/67b53.Czytania-mszalne/{str(thedate)}"
 
     page = requests.get(URL)
     soup = BeautifulSoup(page.content, "html.parser")
@@ -76,7 +69,6 @@ def draw_text(thedate, verse_break):
     # content_dic['PSALM RESPONSORYJNY']
 
     path = r"C:\Users\Acne\Pictures\Cyfrowa Biblia\automatyzacja\paper.gif"
-
     image_size = 1080
     with Image.open(path) as im:
         out = Image.new("RGB", (image_size, image_size), "white")
@@ -91,247 +83,17 @@ def draw_text(thedate, verse_break):
             y = 0
             x += size_x_left
 
-
-    tahoma = r"C:\Windows\Fonts\tahoma.ttf"
-    tahoma_bold = r"C:\Windows\Fonts\tahomabd.ttf"
-
-    # current_path = WindowsPath(r'C:\Users\Acne\Pictures\Cyfrowa Biblia\\' + str(today))
-    current_path = f'./web/{today}/'
+    current_path = f'./web/{thedate}/'
     
     os.makedirs(current_path, exist_ok=True)
-
-    def draw_text(out, name, current_path, size_x_left, size_y, font_size):
-
-        font_size_small = int(0.75 * font_size)
-
-        fnt = ImageFont.truetype(tahoma, font_size) 
-        fnt_b = ImageFont.truetype(tahoma_bold, font_size)
-        fnt_s = ImageFont.truetype(tahoma, font_size_small)
-
-        size_x_left = int(25/12 * font_size)
-        size_x_right = image_size - 2 * size_x_left  
-        size_y = int(1.2 * font_size)
-        # width = int(80 - 0.325 * size_x_left)
-        width = (30 + 0.45 * font_size)
-
-        out_func = copy.deepcopy(out)
-        draw = ImageDraw.Draw(out_func) 
-
-        draw.text((size_x_left, size_x_left), name, font=fnt_b, fill="red", anchor='lm')
-        draw.text((size_x_right + size_x_left, size_x_left), content_dic[name][0], font=fnt_b, fill="red", anchor='rm') #TODO
-        
-        var_y = size_x_left + size_y
-        draw.text((size_x_left, var_y), content_dic[name][1], font=fnt_s, fill="black", anchor='lm')
-        
-        lines = textwrap.wrap(content_dic[name][2], width=width, initial_indent='     ')
-        lines[0] = lines[0].strip()
-        for line in lines:
-            var_y += size_y
-            draw.text((size_x_left, var_y), line, font=fnt_b, fill="black", anchor='lm')
-        
-        var_y += size_x_left
-        
-        for count, element in enumerate(content_dic[name][3:-1]):
-            lines = textwrap.wrap(content_dic[name][3+count], width=width, initial_indent='     ')
-            lines[0] = lines[0].strip()
-            space_length_regular = 15
-
-            for line_count, line in enumerate(lines):
-                x_word = size_x_left
-                x_word_intended = 2 * size_x_left
-                words = line.split(" ")
-                words_length = sum(draw.textlength(w, font=fnt) for w in words)
-                if len(words) == 1:
-                    words.append(' ')
-
-                if line_count == len(lines)-1:
-                    if words_length + (len(words)-1) * space_length_regular > size_x_right:
-                        space_length_regular = (size_x_right - words_length) / (len(words) - 1)
-                    for word in words:
-                        draw.text((x_word, var_y), word, font=fnt, fill="black", anchor='lm')
-                        x_word += draw.textlength(word, font=fnt) + space_length_regular
-                    var_y += size_y  
-                    break
-                
-                space_length_intended = (size_x_right - x_word - words_length) / (len(words) - 1)
-                space_length_regular = (size_x_right - words_length) / (len(words) - 1)
-            
-                if line_count == 0 and line != 'Bracia:' and 'Jezus powiedział' not in line:
-                    for word in words:
-                        draw.text((x_word_intended, var_y), word, font=fnt, fill="black", anchor='lm')
-                        x_word_intended += draw.textlength(word, font=fnt) + space_length_intended
-
-                else:
-                    for word in words:
-                        draw.text((x_word, var_y), word, font=fnt, fill="black", anchor='lm')
-                        x_word += draw.textlength(word, font=fnt) + space_length_regular
-                var_y += size_y            
-                
-        draw.text((2*size_x_left, var_y+size_y), content_dic[name][-1], font=fnt_b, fill="black", anchor='lm')
-
-        returned = {'drawn_y': var_y+size_y, 'picture': out_func}
-
-        return returned
-
-        out_func = copy.deepcopy(out)
-
 
     if "DRUGIE CZYTANIE" in content_dic:
         if 'ŚPIEW PRZED EWANGELIĄ' in content_dic["DRUGIE CZYTANIE"]:
             content_dic["DRUGIE CZYTANIE"] = content_dic["DRUGIE CZYTANIE"][:-6]
 
-
-    def draw_text_pagination_first(out, reading_list, current_path, size_x_left, size_y, font_size):
-
-        font_size_small = int(0.75 * font_size)
-
-        fnt = ImageFont.truetype(tahoma, font_size) 
-        fnt_b = ImageFont.truetype(tahoma_bold, font_size)
-        fnt_s = ImageFont.truetype(tahoma, font_size_small)
-
-        size_x_left = int(25/12 * font_size)
-        size_x_right = image_size - 2 * size_x_left
-        size_y = int(1.2 * font_size)
-        # width = int(80 - 0.35 * size_x_left)
-        width = (30 + 0.45 * font_size)
-
-        out_func = copy.deepcopy(out)
-        draw = ImageDraw.Draw(out_func) 
-
-    #TODO
-        draw.text((size_x_left, size_x_left), reading_list[0], font=fnt_b, fill="red", anchor='lm')
-        draw.text((size_x_right + size_x_left, size_x_left), reading_list[1], font=fnt_b, fill="red", anchor='rm') #TODO
-        
-        var_y = size_x_left + size_y
-        draw.text((size_x_left, var_y), reading_list[2], font=fnt_s, fill="black", anchor='lm')
-        
-        lines = textwrap.wrap(reading_list[3], width=width, initial_indent='     ')
-        lines[0] = lines[0].strip()
-        for line in lines:
-            var_y += size_y
-            draw.text((size_x_left, var_y), line, font=fnt_b, fill="black", anchor='lm')
-        
-        var_y += size_x_left
-        
-        for count, element in enumerate(reading_list[4:]):
-            lines = textwrap.wrap(reading_list[4+count], width=width, initial_indent='     ')
-            lines[0] = lines[0].strip()
-            space_length_regular = 15
-
-            for line_count, line in enumerate(lines):
-                x_word = size_x_left
-                x_word_intended = 2 * size_x_left
-                words = line.split(" ")
-                words_length = sum(draw.textlength(w, font=fnt) for w in words)
-                if len(words)==1:
-                    words.append(' ')
-
-                    for word in words:
-                        draw.text((x_word, var_y), word, font=fnt, fill="black", anchor='lm')
-                        x_word += draw.textlength(word, font=fnt) + space_length_regular
-                    var_y += size_y  
-                    break
-
-                if line_count == len(lines)-1:
-                    if words_length + (len(words)-1) * space_length_regular > size_x_right:
-                        space_length_regular = (size_x_right - words_length) / (len(words) - 1)
-                    for word in words:
-                        draw.text((x_word, var_y), word, font=fnt, fill="black", anchor='lm')
-                        x_word += draw.textlength(word, font=fnt) + space_length_regular
-                    var_y += size_y  
-                    break
-                
-                space_length_intended = (size_x_right - x_word - words_length) / (len(words) - 1)
-                space_length_regular = (size_x_right - words_length) / (len(words) - 1)
-            
-                if line_count == 0 and line != 'Bracia:' and 'Jezus powiedział' not in line:
-                    for word in words:
-                        draw.text((x_word_intended, var_y), word, font=fnt, fill="black", anchor='lm')
-                        x_word_intended += draw.textlength(word, font=fnt) + space_length_intended
-
-                else:
-                    for word in words:
-                        draw.text((x_word, var_y), word, font=fnt, fill="black", anchor='lm')
-                        x_word += draw.textlength(word, font=fnt) + space_length_regular
-                var_y += size_y            
-                
-
-        returned = {'drawn_y': var_y+size_y, 'picture': out_func}
-
-        return returned
-
-    def draw_text_pagination_second(out, reading_list, current_path, size_x_left, size_y, font_size):
-
-        font_size_small = int(0.75 * font_size)
-    
-        fnt = ImageFont.truetype(tahoma, font_size) 
-        fnt_b = ImageFont.truetype(tahoma_bold, font_size)
-        fnt_s = ImageFont.truetype(tahoma, font_size_small)
-
-        size_x_left = int(25/12 * font_size)
-        size_x_right = image_size - 2 * size_x_left
-        size_y = int(1.2 * font_size)
-        # width = int(80 - 0.35 * size_x_left)
-        width = (30 + 0.45 * font_size)
-
-        out_func = copy.deepcopy(out)
-        draw = ImageDraw.Draw(out_func) 
-
-        var_y = size_x_left
-        print(reading_list)
-        lines = textwrap.wrap(reading_list[0], width=width, initial_indent='     ')
-        lines[0] = lines[0].strip()
-        
-        for count, element in enumerate(reading_list[0:-1]):
-            lines = textwrap.wrap(reading_list[0+count], width=width, initial_indent='     ')
-            lines[0] = lines[0].strip()
-            space_length_regular = 15
-
-            for line_count, line in enumerate(lines):
-                x_word = size_x_left
-                x_word_intended = 2 * size_x_left
-                words = line.split(" ")
-                words_length = sum(draw.textlength(w, font=fnt) for w in words)
-                if len(words)==1:
-                    words.append(' ')
-
-                    for word in words:
-                        draw.text((x_word, var_y), word, font=fnt, fill="black", anchor='lm')
-                        x_word += draw.textlength(word, font=fnt) + space_length_regular
-                    var_y += size_y  
-                    break
-
-                if line_count == len(lines)-1:
-                    if words_length + (len(words)-1) * space_length_regular > size_x_right:
-                        space_length_regular = (size_x_right - words_length) / (len(words) - 1)
-                    for word in words:
-                        draw.text((x_word, var_y), word, font=fnt, fill="black", anchor='lm')
-                        x_word += draw.textlength(word, font=fnt) + space_length_regular
-                    var_y += size_y  
-                    break
-                
-                space_length_intended = (size_x_right - x_word - words_length) / (len(words) - 1)
-                space_length_regular = (size_x_right - words_length) / (len(words) - 1)
-            
-                if line_count == 0 and line != 'Bracia:' and 'Jezus powiedział' not in line:
-                    for word in words:
-                        draw.text((x_word_intended, var_y), word, font=fnt, fill="black", anchor='lm')
-                        x_word_intended += draw.textlength(word, font=fnt) + space_length_intended
-
-                else:
-                    for word in words:
-                        draw.text((x_word, var_y), word, font=fnt, fill="black", anchor='lm')
-                        x_word += draw.textlength(word, font=fnt) + space_length_regular
-                var_y += size_y            
-                
-        draw.text((2*size_x_left, var_y+size_y), reading_list[-1], font=fnt_b, fill="black", anchor='lm')
-        returned = {'drawn_y': var_y+size_y, 'picture': out_func}
-
-        return returned
-
 # def readings_creation():
     min_font_before_pagination = 30
-    pagination_font_size = 38
+    pagination_font_size = 36
 
     posts_list = []
     for text in content_dic.keys():
@@ -339,44 +101,37 @@ def draw_text(thedate, verse_break):
     # ['PIERWSZE CZYTANIE']:
         if text != 'PSALM RESPONSORYJNY':
             font_size = 43
-            returned = draw_text(out, text, current_path, size_x_left, size_y, font_size)
-            # print(returned['drawn_y'])
-            # print(returned['drawn_y'] < (image_size - 20))
+            returned = draw_text(content_dic, out, text, size_x_left, size_y, font_size)
+
             if returned['drawn_y'] <= (image_size - 20):
-                # returned['picture'].show()
                 returned['picture'].save(current_path + f'{text}.png')
                 posts_list.append(f'{text}.png')
 
             while returned['drawn_y'] > image_size - 20:
-               
                 if font_size < min_font_before_pagination:
                     pagination_dic = {}
                     pagination_dic[f'{text} cz.1'] = content_dic[f'{text}'][:verse_break]
                     pagination_dic[f'{text} cz.1'].insert(0, f'{text}' )
                     pagination_dic[f'{text} cz.2'] = content_dic[f'{text}'][verse_break:]
                     
-                    returned = draw_text_pagination_first(out, pagination_dic[f'{text} cz.1'], current_path, size_x_left, size_y, pagination_font_size)
-                    # returned['picture'].show()
+                    returned = draw_text_pagination_first(out, pagination_dic[f'{text} cz.1'], size_x_left, size_y, pagination_font_size)
                     returned['picture'].save(current_path + f'{text}1.png')
                     posts_list.append(f'{text}1.png')
 
-                    returned = draw_text_pagination_second(out,  pagination_dic[f'{text} cz.2'], current_path, size_x_left, size_y, pagination_font_size)
-                    # returned['picture'].show()
+                    returned = draw_text_pagination_second(out,  pagination_dic[f'{text} cz.2'], size_x_left, size_y, pagination_font_size)
                     returned['picture'].save(current_path + f'{text}2.png')
                     posts_list.append(f'{text}2.png')
 
                     break
-
                 else:
                     font_size -= 1
-                    returned = draw_text(out, text, current_path, size_x_left, size_y, font_size)
+                    returned = draw_text(content_dic, out, text, size_x_left, size_y, font_size)
 
             else:
-                # returned['picture'].show()
                 returned['picture'].save(current_path + f'{text}.png')
                 posts_list.append(f'{text}.png')
             
-    font_size_psalm = 34
+    font_size_psalm = 30
     font_size_small_psalm = int(0.75 * font_size_psalm)
 
     tahoma = r"C:\Windows\Fonts\tahoma.ttf"
@@ -397,7 +152,6 @@ def draw_text(thedate, verse_break):
     # content_dic["PSALM RESPONSORYJNY"].insert(-1, 'pójdźcie, narody, oddajcie pokłon Panu,')
     # content_dic["PSALM RESPONSORYJNY"].insert(-1, 'bo wielka światłość zstąpiła dzisiaj na ziemię.')
     content_dic["PSALM RESPONSORYJNY"]
-
 
     out_psalm = copy.deepcopy(out)
     draw = ImageDraw.Draw(out_psalm) 
@@ -434,9 +188,7 @@ def draw_text(thedate, verse_break):
 
             draw.text((x_distance, y_text+y_further_distance*6+y_distance), "Aklamacja: ", font=fnt_b_psalm, fill="red", anchor='lm') 
             draw.text((x_distance*4, y_text+y_further_distance*6+y_distance), acclamation[5][10:], font=fnt_b_psalm, fill="black", anchor='lm')
-
             break  
-
     # TODO
         elif 'albo' in element:
             continue
@@ -448,17 +200,14 @@ def draw_text(thedate, verse_break):
     # out_psalm.show()
     out_psalm.save(current_path + 'PSALM RESPONSORYJNY.png')
     posts_list.append('PSALM RESPONSORYJNY.png')
-    print(posts_list)
+    # print(posts_list)
     
-    box = ['/' + str(today) + '/', *posts_list]
+    box = ['/' + str(thedate) + '/', *posts_list]
     return box
 
 @eel.expose
 def readings_eng(thedate):
-    # today = date.today()
-    # today = '2024-01-29'
-    today = thedate
-    URL = f"https://www.vaticannews.va/en/word-of-the-day/{str(today).replace('-', '/')}.html"
+    URL = f"https://www.vaticannews.va/en/word-of-the-day/{str(thedate).replace('-', '/')}.html"
     page = requests.get(URL)
     soup = BeautifulSoup(page.content, "html.parser")
     content_list = soup.find_all("div", "section__content")[:2]
@@ -469,16 +218,12 @@ def readings_eng(thedate):
 
 @eel.expose
 def readings_pol(thedate):
-    # today = date.today()
-    # today = '2024-01-29'
-    today = thedate
-    print(today)
-    URL = f"https://liturgia.wiara.pl/kalendarz/67b53.Czytania-mszalne/{str(today)}"
+    URL = f"https://liturgia.wiara.pl/kalendarz/67b53.Czytania-mszalne/{str(thedate)}"
     page = requests.get(URL)
     soup = BeautifulSoup(page.content, "html.parser")
     content_list = soup.find_all("div", "txt__rich-area")[1].get_text().split('\n')
     return content_list[3:]
    
 if __name__=="__main__":
-    draw_text()
+    draw_post()
 

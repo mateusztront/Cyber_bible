@@ -5,8 +5,8 @@ document.querySelector(".posts").onclick = async function() {
       var thedate = document.getElementById('input_date').value;
       var verse_break = document.getElementById('verse_break').value;
       console.log(verse_break);
-      const box = await eel.draw_text(thedate, verse_break)();
-      // eel.draw_text()(path => console.log('Got this from Python: ' + path));
+      const box = await eel.draw_post(thedate, verse_break)();
+      // eel.draw_post()(path => console.log('Got this from Python: ' + path));
       // console.log($("#input_date").val());                    
       // !!!!!!!!!!!! add retured graphic to the html 
       console.log(box)
@@ -23,7 +23,7 @@ document.querySelector(".posts").onclick = async function() {
 document.querySelector(".english_readings").onclick = async function() {   
       var thedate = document.getElementById('input_date').value;
       const content_list_text = await eel.readings_eng(thedate)();
-      // eel.draw_text()(path => console.log('Got this from Python: ' + path));
+      // eel.draw_post()(path => console.log('Got this from Python: ' + path));
       // console.log(path);                    
       // !!!!!!!!!!!! add retured graphic to the html 
       console.log(content_list_text)
@@ -38,7 +38,7 @@ document.querySelector(".english_readings").onclick = async function() {
 document.querySelector(".polish_readings").onclick = async function() {   
       var thedate = document.getElementById('input_date').value;
       const content_list_text = await eel.readings_pol(thedate)();
-      // eel.draw_text()(path => console.log('Got this from Python: ' + path));
+      // eel.draw_post()(path => console.log('Got this from Python: ' + path));
       // console.log(path);                    
       // !!!!!!!!!!!! add retured graphic to the html 
       console.log(content_list_text)
