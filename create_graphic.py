@@ -5,7 +5,7 @@ from PIL import Image, ImageDraw, ImageFont
 import copy
 import os
 from functools import reduce
-from draw_posts import draw_text, draw_text_pagination_first, draw_text_pagination_second
+from draw_posts import draw_text, draw_text_pagination_first, draw_text_pagination_second, draw_psalm
 
 @eel.expose
 def draw_post(thedate, verse_break):
@@ -137,7 +137,7 @@ def draw_post(thedate, verse_break):
                 returned['picture'].save(current_path + f'{text}.png')
                 posts_list.append(f'{text}.png')
 
-    font_size_psalm = 35
+    font_size_psalm = 40
     returned = draw_psalm(content_dic, out, font_size_psalm)
     while returned['drawn_y'] > image_size - 20:
         font_size -= 1
