@@ -229,3 +229,70 @@ def draw_text_pagination_second(out, reading_list, size_x_left, size_y, font_siz
     returned = {'drawn_y': var_y+size_y, 'picture': out_func}
 
     return returned
+
+ ### PSALM ###
+def draw_psalm(content_dic, out, font_size_psalm):         
+    tahoma = r"C:\Windows\Fonts\tahoma.ttf"
+    tahoma_bold = r"C:\Windows\Fonts\tahomabd.ttf"
+
+    fnt_psalm = ImageFont.truetype(tahoma, font_size_psalm) 
+    fnt_b_psalm = ImageFont.truetype(tahoma_bold, font_size_psalm)
+
+    # content_dic["PSALM RESPONSORYJNY"].insert(16, 'Refren')
+
+    if len(content_dic["PSALM RESPONSORYJNY"][0]) > 30:
+        content_dic["PSALM RESPONSORYJNY"][0] = content_dic["PSALM RESPONSORYJNY"][0].split(',')[0]
+        
+    # del content_dic["PSALM RESPONSORYJNY"][-2]
+    # content_dic["PSALM RESPONSORYJNY"].insert(-1, 'pójdźcie, narody, oddajcie pokłon Panu,')
+    # content_dic["PSALM RESPONSORYJNY"].insert(-1, 'bo wielka światłość zstąpiła dzisiaj na ziemię.')
+
+    out_psalm = copy.deepcopy(out)
+    draw = ImageDraw.Draw(out_psalm) 
+
+    y_distance = font_size_psalm * 0.95
+    y_further_distance = font_size_psalm * 0.7
+    x_distance = font_size_psalm * 2
+
+    draw.text((x_distance, y_further_distance*2), "PSALM RESPONSORYJNY", font=fnt_b_psalm, fill="red", anchor='lm')
+    draw.text((1000, y_further_distance*2), content_dic["PSALM RESPONSORYJNY"][0], font=fnt_b_psalm, fill="red", anchor='rm')
+    draw.text((x_distance, y_further_distance*4), "Refren: ", font=fnt_b_psalm, fill="red", anchor='lm')
+    draw.text((x_distance*3, y_further_distance*4), content_dic["PSALM RESPONSORYJNY"][1][7:], font=fnt_b_psalm, fill="black", anchor='lm')
+
+    y_text = y_further_distance*6
+    for count, element in enumerate(content_dic["PSALM RESPONSORYJNY"][2:]):
+        if "Refren" in element:
+            y_text += y_further_distance
+            draw.text((x_distance, y_text), "Refren: ", font=fnt_b_psalm, fill="red", anchor='lm')
+            draw.text((x_distance*3, y_text), content_dic["PSALM RESPONSORYJNY"][1][7:], font=fnt_b_psalm, fill="black", anchor='lm')
+            y_text += y_further_distance
+            final_y_text = y_text
+        elif "ŚPIEW PRZED EWANGELIĄ" in element:
+            acclamation = content_dic["PSALM RESPONSORYJNY"][count+2:]
+            # if 'ŚPIEW' in acclamation[0]:
+            #     acclamation.insert(1, '')
+            # print(acclamation)
+            draw.text((x_distance, y_text), "AKLAMACJA PRZED EWANGELIĄ", font=fnt_b_psalm, fill="red", anchor='lm')
+            draw.text((1000, y_text), acclamation[1], font=fnt_b_psalm, fill="red", anchor='rm')
+            draw.text((x_distance, y_text+y_further_distance*2), "Aklamacja: ", font=fnt_b_psalm, fill="red", anchor='lm')
+            draw.text((x_distance*4, y_text+y_further_distance*2), acclamation[2][10:], font=fnt_b_psalm, fill="black", anchor='lm')
+            draw.text((x_distance*2, y_text+y_further_distance*4), acclamation[3], font=fnt_psalm, fill="black", anchor='lm')
+            draw.text((x_distance*2, y_text+y_further_distance*4+y_distance), acclamation[4], font=fnt_psalm, fill="black", anchor='lm')
+            # draw.text((x_distance*2, y_text+y_further_distance*3+y_distance), acclamation[5], font=fnt_psalm, fill="black", anchor='lm')
+
+            draw.text((x_distance, y_text+y_further_distance*6+y_distance), "Aklamacja: ", font=fnt_b_psalm, fill="red", anchor='lm') 
+            draw.text((x_distance*4, y_text+y_further_distance*6+y_distance), acclamation[5][10:], font=fnt_b_psalm, fill="black", anchor='lm')
+            final_y_text = y_text+y_further_distance*6+y_distance
+            break  
+    # TODO
+        elif 'albo' in element:
+            continue
+
+        else:
+            draw.text((x_distance*2, y_text), element, font=fnt_psalm, fill="black", anchor='lm')
+        y_text += y_distance
+        final_y_text=y_text
+        # out_psalm.show()
+    returned = {'drawn_y': final_y_text, 'picture': out_psalm}
+    return returned
+    

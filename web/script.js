@@ -1,5 +1,7 @@
 // let thedate = document.querySelector("#input_date").value;
- 
+let isAdding = true;
+const imageElements = [];
+
 // Onclick of the button 
 document.querySelector(".posts").onclick = async function() {   
       var thedate = document.getElementById('input_date').value;
@@ -9,15 +11,23 @@ document.querySelector(".posts").onclick = async function() {
       // eel.draw_post()(path => console.log('Got this from Python: ' + path));
       // console.log($("#input_date").val());                    
       // !!!!!!!!!!!! add retured graphic to the html 
-      console.log(box)
-      for (let i = 1; i < box.length; i++) {
-        imageElement = document.createElement('img'); 
-        imageElement.src = box[0] + box[i]; 
-        console.log(imageElement.src)
-        imageElement.width="400";
-        imageElement.height="400";
-        document.body.appendChild(imageElement);     
+      console.log(box);
+      if (isAdding) {
+        for (let i = 1; i < box.length; i++) {
+          imageElement = document.createElement('img'); 
+          imageElement.src = box[0] + box[i]; 
+          console.log(imageElement.src)
+          imageElement.width="400";
+          imageElement.height="400";
+          document.body.appendChild(imageElement);  
+          imageElements.push(imageElement);   
+          }
+        } else {
+          // Remove all previously added elements
+          imageElements.forEach(element => element.remove());
+          imageElements.length = 0;
         }
+        isAdding = !isAdding;
       }
 
 document.querySelector(".english_readings").onclick = async function() {   

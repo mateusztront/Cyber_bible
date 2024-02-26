@@ -55,7 +55,6 @@ def draw_post(thedate, verse_break):
             content_dic[cut_points[0]] = staging_list
 
     content_dic 
-    
 
     if 'EWANGELIA KRÓTSZA' in content_list:
         content_dic['EWANGELIA KRÓTSZA'].insert(1, content_dic['EWANGELIA DŁUŻSZA'][1])
@@ -93,9 +92,10 @@ def draw_post(thedate, verse_break):
 
 # def readings_creation():
     min_font_before_pagination = 30
-    pagination_font_size = 36
+    pagination_font_size = 44
 
     posts_list = []
+
     for text in content_dic.keys():
     # .keys():
     # ['PIERWSZE CZYTANIE']:
@@ -110,18 +110,24 @@ def draw_post(thedate, verse_break):
             while returned['drawn_y'] > image_size - 20:
                 if font_size < min_font_before_pagination:
                     pagination_dic = {}
+                    if verse_break == 0:
+                        verse_break = round((len(content_dic[f'{text}']) - 3) / 2 + 3)
                     pagination_dic[f'{text} cz.1'] = content_dic[f'{text}'][:verse_break]
                     pagination_dic[f'{text} cz.1'].insert(0, f'{text}' )
                     pagination_dic[f'{text} cz.2'] = content_dic[f'{text}'][verse_break:]
-                    
-                    returned = draw_text_pagination_first(out, pagination_dic[f'{text} cz.1'], size_x_left, size_y, pagination_font_size)
-                    returned['picture'].save(current_path + f'{text}1.png')
-                    posts_list.append(f'{text}1.png')
+                    returned_1 = draw_text_pagination_first(out, pagination_dic[f'{text} cz.1'], size_x_left, size_y, pagination_font_size)
+                    returned_2 = draw_text_pagination_second(out, pagination_dic[f'{text} cz.2'], size_x_left, size_y, pagination_font_size)
 
-                    returned = draw_text_pagination_second(out,  pagination_dic[f'{text} cz.2'], size_x_left, size_y, pagination_font_size)
-                    returned['picture'].save(current_path + f'{text}2.png')
-                    posts_list.append(f'{text}2.png')
-
+                    while returned_1['drawn_y'] > image_size - 20 or returned_2['drawn_y'] > image_size - 20:
+                        pagination_font_size -= 1
+                        returned_1 = draw_text_pagination_first(out, pagination_dic[f'{text} cz.1'], size_x_left, size_y, pagination_font_size)
+                        returned_2 = draw_text_pagination_second(out, pagination_dic[f'{text} cz.2'], size_x_left, size_y, pagination_font_size)
+                    else:
+                        returned_1['picture'].save(current_path + f'{text}1.png')
+                        returned_2['picture'].save(current_path + f'{text}2.png')
+                        posts_list.append(f'{text}1.png')
+                        posts_list.append(f'{text}2.png')
+                        
                     break
                 else:
                     font_size -= 1
@@ -130,76 +136,15 @@ def draw_post(thedate, verse_break):
             else:
                 returned['picture'].save(current_path + f'{text}.png')
                 posts_list.append(f'{text}.png')
-            
-    font_size_psalm = 30
-    font_size_small_psalm = int(0.75 * font_size_psalm)
 
-    tahoma = r"C:\Windows\Fonts\tahoma.ttf"
-    tahoma_bold = r"C:\Windows\Fonts\tahomabd.ttf"
-
-    fnt_psalm = ImageFont.truetype(tahoma, font_size_psalm) 
-    fnt_b_psalm = ImageFont.truetype(tahoma_bold, font_size_psalm)
-    fnt_s_psalm = ImageFont.truetype(tahoma, font_size_small_psalm)
-
-
-    # content_dic["PSALM RESPONSORYJNY"].insert(16, 'Refren')
-    content_dic["PSALM RESPONSORYJNY"]
-
-    if len(content_dic["PSALM RESPONSORYJNY"][0]) > 30:
-        content_dic["PSALM RESPONSORYJNY"][0] = content_dic["PSALM RESPONSORYJNY"][0].split(',')[0]
-        
-    # del content_dic["PSALM RESPONSORYJNY"][-2]
-    # content_dic["PSALM RESPONSORYJNY"].insert(-1, 'pójdźcie, narody, oddajcie pokłon Panu,')
-    # content_dic["PSALM RESPONSORYJNY"].insert(-1, 'bo wielka światłość zstąpiła dzisiaj na ziemię.')
-    content_dic["PSALM RESPONSORYJNY"]
-
-    out_psalm = copy.deepcopy(out)
-    draw = ImageDraw.Draw(out_psalm) 
-
-    y_distance = font_size_psalm * 0.95
-    y_further_distance = font_size_psalm * 0.7
-    x_distance = font_size_psalm * 2
-
-    draw.text((x_distance, y_further_distance*2), "PSALM RESPONSORYJNY", font=fnt_b_psalm, fill="red", anchor='lm')
-    draw.text((1000, y_further_distance*2), content_dic["PSALM RESPONSORYJNY"][0], font=fnt_b_psalm, fill="red", anchor='rm')
-    draw.text((x_distance, y_further_distance*4), "Refren: ", font=fnt_b_psalm, fill="red", anchor='lm')
-    draw.text((x_distance*3, y_further_distance*4), content_dic["PSALM RESPONSORYJNY"][1][7:], font=fnt_b_psalm, fill="black", anchor='lm')
-
-    y_text = y_further_distance*6
-    for count, element in enumerate(content_dic["PSALM RESPONSORYJNY"][2:]):
-
-        if "Refren" in element:
-            y_text += y_further_distance
-            draw.text((x_distance, y_text), "Refren: ", font=fnt_b_psalm, fill="red", anchor='lm')
-            draw.text((x_distance*3, y_text), content_dic["PSALM RESPONSORYJNY"][1][7:], font=fnt_b_psalm, fill="black", anchor='lm')
-            y_text += y_further_distance
-        elif "ŚPIEW PRZED EWANGELIĄ" in element:
-            acclamation = content_dic["PSALM RESPONSORYJNY"][count+2:]
-            # if 'ŚPIEW' in acclamation[0]:
-            #     acclamation.insert(1, '')
-            # print(acclamation)
-            draw.text((x_distance, y_text), "AKLAMACJA PRZED EWANGELIĄ", font=fnt_b_psalm, fill="red", anchor='lm')
-            draw.text((1000, y_text), acclamation[1], font=fnt_b_psalm, fill="red", anchor='rm')
-            draw.text((x_distance, y_text+y_further_distance*2), "Aklamacja: ", font=fnt_b_psalm, fill="red", anchor='lm')
-            draw.text((x_distance*4, y_text+y_further_distance*2), acclamation[2][10:], font=fnt_b_psalm, fill="black", anchor='lm')
-            draw.text((x_distance*2, y_text+y_further_distance*4), acclamation[3], font=fnt_psalm, fill="black", anchor='lm')
-            draw.text((x_distance*2, y_text+y_further_distance*4+y_distance), acclamation[4], font=fnt_psalm, fill="black", anchor='lm')
-            # draw.text((x_distance*2, y_text+y_further_distance*3+y_distance), acclamation[5], font=fnt_psalm, fill="black", anchor='lm')
-
-            draw.text((x_distance, y_text+y_further_distance*6+y_distance), "Aklamacja: ", font=fnt_b_psalm, fill="red", anchor='lm') 
-            draw.text((x_distance*4, y_text+y_further_distance*6+y_distance), acclamation[5][10:], font=fnt_b_psalm, fill="black", anchor='lm')
-            break  
-    # TODO
-        elif 'albo' in element:
-            continue
-
-        else:
-            draw.text((x_distance*2, y_text), element, font=fnt_psalm, fill="black", anchor='lm')
-        y_text += y_distance
-
-    # out_psalm.show()
-    out_psalm.save(current_path + 'PSALM RESPONSORYJNY.png')
-    posts_list.append('PSALM RESPONSORYJNY.png')
+    font_size_psalm = 35
+    returned = draw_psalm(content_dic, out, font_size_psalm)
+    while returned['drawn_y'] > image_size - 20:
+        font_size -= 1
+        returned = draw_psalm(content_dic, out, font_size)
+    else:
+        returned['picture'].save(current_path + 'PSALM RESPONSORYJNY.png')
+        posts_list.append('PSALM RESPONSORYJNY.png')
     # print(posts_list)
     
     box = ['/' + str(thedate) + '/', *posts_list]
