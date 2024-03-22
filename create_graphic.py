@@ -17,6 +17,29 @@ def draw_post(thedate, verse_break):
     content_list = soup.find_all("div", "txt__rich-area")[1].get_text().split('\n')
     if content_list[-1] == '':
         del content_list[-1]
+    
+    try:
+        i = content_list.index('EWANGELIA ')
+        content_list[i] = content_list[i].replace('EWANGELIA ', 'EWANGELIA')
+    except:
+        pass
+    
+    try:
+        content_list = content_list[content_list.index('PIERWSZE CZYTANIE KRÓTSZE'):content_list.index('Oto słowo Pańskie.')+1]
+        content_list[0] = content_list[0].replace('PIERWSZE CZYTANIE KRÓTSZE', 'PIERWSZE CZYTANIE')
+    except:
+        pass
+
+    try:
+        content_list = content_list[:content_list.index('Oto słowo Pańskie.')+1]
+    except:
+        pass
+    
+    try:
+        content_list = content_list[:content_list.index('albo:')]
+        # content_list[0] = content_list[0].replace('PIERWSZE CZYTANIE KRÓTSZE', 'PIERWSZE CZYTANIE')
+    except:
+        pass
 
     if 'EWANGELIA DŁUŻSZA' in content_list:
         cut_points = ['PIERWSZE CZYTANIE', 'PSALM RESPONSORYJNY', 'DRUGIE CZYTANIE', 'EWANGELIA DŁUŻSZA', 'EWANGELIA KRÓTSZA']
@@ -31,9 +54,13 @@ def draw_post(thedate, verse_break):
     for text in content_list:
         if 'Liturgia Słowa' in text or '' == text:
             continue
-            
+        if text != text.strip():
+          
+            content_list[content_list.index(text)] = text.strip()
+            text = text.strip()
+            print(content_list[content_list.index(text)])
+            print(text)
         if text in cut_points:
-
             for text in content_list[content_list.index(text)+1:]:
                 if text == '':
                     continue
@@ -53,8 +80,6 @@ def draw_post(thedate, verse_break):
                     break
             
             content_dic[cut_points[0]] = staging_list
-
-    content_dic 
 
     if 'EWANGELIA KRÓTSZA' in content_list:
         content_dic['EWANGELIA KRÓTSZA'].insert(1, content_dic['EWANGELIA DŁUŻSZA'][1])
@@ -92,7 +117,6 @@ def draw_post(thedate, verse_break):
 
 # def readings_creation():
     min_font_before_pagination = 30
-    pagination_font_size = 44
 
     posts_list = []
 
@@ -101,11 +125,12 @@ def draw_post(thedate, verse_break):
     # ['PIERWSZE CZYTANIE']:
         if text != 'PSALM RESPONSORYJNY':
             font_size = 43
+            pagination_font_size = 44
             returned = draw_text(content_dic, out, text, size_x_left, size_y, font_size)
 
             if returned['drawn_y'] <= (image_size - 20):
-                returned['picture'].save(current_path + f'{text}.png')
-                posts_list.append(f'{text}.png')
+                returned['picture'].save(current_path + f'{text}.jpg')
+                posts_list.append(f'{text}.jpg')
 
             while returned['drawn_y'] > image_size - 20:
                 if font_size < min_font_before_pagination:
@@ -123,10 +148,10 @@ def draw_post(thedate, verse_break):
                         returned_1 = draw_text_pagination_first(out, pagination_dic[f'{text} cz.1'], size_x_left, size_y, pagination_font_size)
                         returned_2 = draw_text_pagination_second(out, pagination_dic[f'{text} cz.2'], size_x_left, size_y, pagination_font_size)
                     else:
-                        returned_1['picture'].save(current_path + f'{text}1.png')
-                        returned_2['picture'].save(current_path + f'{text}2.png')
-                        posts_list.append(f'{text}1.png')
-                        posts_list.append(f'{text}2.png')
+                        returned_1['picture'].save(current_path + f'{text}1.jpg')
+                        returned_2['picture'].save(current_path + f'{text}2.jpg')
+                        posts_list.append(f'{text}1.jpg')
+                        posts_list.append(f'{text}2.jpg')
                         
                     break
                 else:
@@ -134,17 +159,17 @@ def draw_post(thedate, verse_break):
                     returned = draw_text(content_dic, out, text, size_x_left, size_y, font_size)
 
             else:
-                returned['picture'].save(current_path + f'{text}.png')
-                posts_list.append(f'{text}.png')
+                returned['picture'].save(current_path + f'{text}.jpg')
+                posts_list.append(f'{text}.jpg')
 
-    font_size_psalm = 40
+    font_size_psalm = 34
     returned = draw_psalm(content_dic, out, font_size_psalm)
     while returned['drawn_y'] > image_size - 20:
-        font_size -= 1
-        returned = draw_psalm(content_dic, out, font_size)
+        font_size_psalm -= 1
+        returned = draw_psalm(content_dic, out, font_size_psalm)
     else:
-        returned['picture'].save(current_path + 'PSALM RESPONSORYJNY.png')
-        posts_list.append('PSALM RESPONSORYJNY.png')
+        returned['picture'].save(current_path + 'PSALM RESPONSORYJNY.jpg')
+        posts_list.append('PSALM RESPONSORYJNY.jpg')
     # print(posts_list)
     
     box = ['/' + str(thedate) + '/', *posts_list]
@@ -170,5 +195,5 @@ def readings_pol(thedate):
     return content_list[3:]
    
 if __name__=="__main__":
-    draw_post()
+    draw_post('2024-02-29', 6)
 

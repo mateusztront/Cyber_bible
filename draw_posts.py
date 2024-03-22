@@ -266,7 +266,7 @@ def draw_psalm(content_dic, out, font_size_psalm):
             draw.text((x_distance, y_text), "Refren: ", font=fnt_b_psalm, fill="red", anchor='lm')
             draw.text((x_distance*3, y_text), content_dic["PSALM RESPONSORYJNY"][1][7:], font=fnt_b_psalm, fill="black", anchor='lm')
             y_text += y_further_distance
-            final_y_text = y_text
+           
         elif "ŚPIEW PRZED EWANGELIĄ" in element:
             acclamation = content_dic["PSALM RESPONSORYJNY"][count+2:]
             # if 'ŚPIEW' in acclamation[0]:
@@ -293,6 +293,7 @@ def draw_psalm(content_dic, out, font_size_psalm):
         y_text += y_distance
         final_y_text=y_text
         # out_psalm.show()
+
     returned = {'drawn_y': final_y_text, 'picture': out_psalm}
     return returned
     
