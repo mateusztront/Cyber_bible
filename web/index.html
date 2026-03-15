@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cyber Bible</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        padding: 20px;
+      }
+      h1 {
+        color: #2c5530;
+        text-align: center;
+      }
+      .controls {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 20px;
+        flex-wrap: wrap;
+      }
+      input {
+        padding: 8px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+      }
+      button {
+        padding: 10px 20px;
+        background-color: #2c5530;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      button:hover {
+        background-color: #1e3d22;
+      }
+      #images-container {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 20px;
+      }
+      #images-container img {
+        border: 1px solid #ddd;
+        border-radius: 4px;
+      }
+      textarea {
+        width: 100%;
+        margin-top: 10px;
+      }
+      .caption-template {
+        white-space: pre-wrap;
+        background-color: #f5f5f5;
+        padding: 10px;
+        border-radius: 4px;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Cyber Bible</h1>
+
+    <div class="controls">
+      <input type="date" id="input_date" name="creation_date" />
+      <input type="number" id="verse_break" name="verse" min="0" value="0" placeholder="Verse break" />
+      <button class="posts">Create post</button>
+      <button class="english_readings">English readings</button>
+      <button class="polish_readings">Polish readings</button>
+      <button class="publish">Publish</button>
+    </div>
+
+    <div class="caption-template">
+***
+Grafika wykonana za pomocą sztucznej inteligencji.
+
+#Bible #Biblia #czytanianadzis #słowoboze #dalle3 #midjourney #catholicchurch
+    </div>
+
+    <div id="images-container"></div>
+    <div id="content-container"></div>
+
+    <script type="text/javascript" src="../eel.js"></script>
+    <script src="./script.js"></script>
+  </body>
+</html>

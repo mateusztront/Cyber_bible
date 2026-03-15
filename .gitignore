@@ -1,0 +1,25 @@
+# Secrets - NEVER commit these
+.env
+session.json
+
+# Python
+*.pyc
+__pycache__/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace
+.claude/
+
+# Generated files
+output.mp3
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
