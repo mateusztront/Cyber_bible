@@ -12,11 +12,20 @@ Cyber Bible is a desktop application that automates creating and publishing litu
 # Install dependencies (uses uv package manager)
 uv sync
 
+# Install with dev dependencies (pytest, etc.)
+uv sync --extra dev
+
 # Run the application
 uv run python main.py
 
-# Run a specific module for testing
-uv run python create_graphic.py
+# Run tests
+uv run pytest tests/ -v
+
+# Run tests with coverage
+uv run pytest tests/ --cov=. --cov-report=term-missing
+
+# Run a single test file
+uv run pytest tests/test_create_graphic.py -v
 ```
 
 ## Architecture

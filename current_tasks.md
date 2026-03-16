@@ -21,4 +21,4 @@
 - Better text fitting algorithm for different content lengths
 
 ## Testing
-- Create tests for core functionality
+- [x] Create tests for core functionality (57 tests, 75% coverage)

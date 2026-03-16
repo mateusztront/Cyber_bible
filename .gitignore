@@ -20,6 +20,8 @@ build/
 output.mp3
 *.log
 web/20*/
+.coverage
+.pytest_cache/
 
 # OS files
 .DS_Store
