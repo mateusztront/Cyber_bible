@@ -33,6 +33,8 @@ from draw_posts import (
     draw_psalm,
 )
 from login import login_user
+from midjourney_wrapper import MidjourneyWrapper
+from prompt_generator import generate_midjourney_prompt, generate_prompt_variations
 
 logger = logging.getLogger(__name__)
 
@@ -567,6 +569,138 @@ Grafika wykonana za pomocą sztucznej inteligencji.
     except Exception as e:
         logger.error(f"Failed to publish: {e}")
         return False
+
+
+# =============================================================================
+# MIDJOURNEY COVER GENERATION FUNCTIONS
+# =============================================================================
+
+
+def _get_readings_dict(thedate: str) -> Dict[str, List[str]]:
+    """
+    Fetch and parse readings for a given date.
+
+    This is a helper that extracts the readings parsing logic
+    so it can be reused by cover generation functions.
+    """
+    url = f"{LITURGY_URL_PL}/{thedate}"
+
+    response = requests.get(url, timeout=30)
+    response.raise_for_status()
+
+    soup = BeautifulSoup(response.content, "html.parser")
+    content_areas = soup.find_all("div", "txt__rich-area")
+
+    if len(content_areas) < 2:
+        raise ValueError("Could not find reading content on page")
+
+    content_list = content_areas[1].get_text().split("\n")
+    content_list = _clean_content_list(content_list)
+    content_list = _normalize_readings(content_list)
+    content_dic = _parse_readings(content_list)
+
+    _truncate_readings(content_dic)
+    _clean_gospel_markers(content_dic)
+
+    return content_dic
+
+
+@eel.expose
+def get_readings_for_cover(thedate: str) -> Dict[str, str]:
+    """
+    Get readings dictionary for user to select which one to use for cover.
+
+    Returns dict with reading names as keys and preview text as values.
+    """
+    try:
+        content_dic = _get_readings_dict(thedate)
+
+        # Return preview (first few lines) of each reading
+        return {
+            name: " ".join(text[:3])[:200] + "..."
+            for name, text in content_dic.items()
+        }
+    except Exception as e:
+        logger.error(f"Failed to get readings for cover: {e}")
+        return {}
+
+
+@eel.expose
+def get_full_reading_text(thedate: str, reading_name: str) -> str:
+    """Get the full text of a specific reading."""
+    try:
+        content_dic = _get_readings_dict(thedate)
+        if reading_name in content_dic:
+            return "\n".join(content_dic[reading_name])
+        return ""
+    except Exception as e:
+        logger.error(f"Failed to get reading text: {e}")
+        return ""
+
+
+@eel.expose
+def generate_cover_prompt(reading_text: str, reading_name: str) -> str:
+    """
+    Generate a Midjourney prompt from reading text using LLM.
+
+    Returns the generated prompt for user to edit.
+    """
+    try:
+        return generate_midjourney_prompt(reading_text, reading_name)
+    except Exception as e:
+        logger.error(f"Failed to generate prompt: {e}")
+        return f"Error generating prompt: {e}"
+
+
+@eel.expose
+def generate_cover_prompt_variations(
+    reading_text: str, reading_name: str, num_variations: int = 3
+) -> List[str]:
+    """
+    Generate multiple prompt variations for user to choose from.
+
+    Returns list of prompts.
+    """
+    try:
+        return generate_prompt_variations(reading_text, reading_name, num_variations)
+    except Exception as e:
+        logger.error(f"Failed to generate prompt variations: {e}")
+        return [f"Error: {e}"]
+
+
+@eel.expose
+def generate_cover_image(thedate: str, prompt: str) -> str:
+    """
+    Generate cover image via Midjourney with the given prompt.
+
+    Returns path to the saved image, or error message.
+    """
+    try:
+        logger.info(f"Generating cover for {thedate} with prompt: {prompt[:50]}...")
+
+        output_path = WEB_DIR / thedate
+        output_path.mkdir(parents=True, exist_ok=True)
+
+        mj = MidjourneyWrapper()
+        cover_path = mj.generate(
+            prompt=prompt,
+            save_path=output_path / "mateusztront.jpg",
+            auto_upscale=True,
+        )
+
+        logger.info(f"Cover generated: {cover_path}")
+        return f"/{thedate}/mateusztront.jpg"
+
+    except Exception as e:
+        logger.error(f"Failed to generate cover: {e}")
+        return f"Error: {e}"
+
+
+@eel.expose
+def check_cover_exists(thedate: str) -> bool:
+    """Check if a cover image already exists for the given date."""
+    cover_path = WEB_DIR / thedate / "mateusztront.jpg"
+    return cover_path.exists()
 
 
 if __name__ == "__main__":

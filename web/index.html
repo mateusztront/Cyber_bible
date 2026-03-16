@@ -9,10 +9,18 @@
       body {
         font-family: Arial, sans-serif;
         padding: 20px;
+        max-width: 1200px;
+        margin: 0 auto;
       }
       h1 {
         color: #2c5530;
         text-align: center;
+      }
+      h2 {
+        color: #2c5530;
+        border-bottom: 2px solid #2c5530;
+        padding-bottom: 5px;
+        margin-top: 30px;
       }
       .controls {
         display: flex;
@@ -20,7 +28,7 @@
         margin-bottom: 20px;
         flex-wrap: wrap;
       }
-      input {
+      input, select {
         padding: 8px;
         border: 1px solid #ccc;
         border-radius: 4px;
@@ -36,6 +44,16 @@
       button:hover {
         background-color: #1e3d22;
       }
+      button:disabled {
+        background-color: #999;
+        cursor: not-allowed;
+      }
+      button.secondary {
+        background-color: #666;
+      }
+      button.secondary:hover {
+        background-color: #444;
+      }
       #images-container {
         display: flex;
         flex-wrap: wrap;
@@ -49,6 +67,7 @@
       textarea {
         width: 100%;
         margin-top: 10px;
+        font-family: monospace;
       }
       .caption-template {
         white-space: pre-wrap;
@@ -57,13 +76,229 @@
         border-radius: 4px;
         font-size: 12px;
       }
+      /* Cover Generation Section */
+      .cover-section {
+        background-color: #f9f9f9;
+        padding: 20px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+        border: 1px solid #ddd;
+      }
+      .cover-section h2 {
+        margin-top: 0;
+        border: none;
+        padding: 0;
+      }
+      .reading-select {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 15px;
+        align-items: center;
+      }
+      .reading-select select {
+        flex: 1;
+        max-width: 300px;
+      }
+      .prompt-area {
+        margin: 15px 0;
+      }
+      .prompt-area textarea {
+        height: 120px;
+        resize: vertical;
+      }
+      .prompt-variations {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin: 15px 0;
+      }
+      .prompt-variation {
+        padding: 10px;
+        background: white;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      .prompt-variation:hover {
+        border-color: #2c5530;
+        background: #f0f8f0;
+      }
+      .prompt-variation.selected {
+        border-color: #2c5530;
+        border-width: 2px;
+        background: #e8f5e9;
+      }
+      .status-message {
+        padding: 10px;
+        border-radius: 4px;
+        margin: 10px 0;
+      }
+      .status-message.info {
+        background-color: #e3f2fd;
+        color: #1565c0;
+      }
+      .status-message.success {
+        background-color: #e8f5e9;
+        color: #2e7d32;
+      }
+      .status-message.error {
+        background-color: #ffebee;
+        color: #c62828;
+      }
+      .status-message.warning {
+        background-color: #fff3e0;
+        color: #ef6c00;
+      }
+      #cover-preview {
+        max-width: 400px;
+        margin-top: 15px;
+        border: 2px solid #2c5530;
+        border-radius: 8px;
+      }
+      /* Reading Display Section */
+      .reading-display-section {
+        background-color: #faf8f5;
+        padding: 20px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+        border: 1px solid #d4c9b5;
+      }
+      .reading-display-section h2 {
+        margin-top: 0;
+        border: none;
+        padding: 0;
+      }
+      .reading-tabs {
+        display: flex;
+        gap: 5px;
+        margin-bottom: 15px;
+        flex-wrap: wrap;
+      }
+      .reading-tab {
+        padding: 8px 16px;
+        background-color: #e8e0d5;
+        border: 1px solid #d4c9b5;
+        border-radius: 4px 4px 0 0;
+        cursor: pointer;
+        font-size: 14px;
+        transition: all 0.2s;
+      }
+      .reading-tab:hover {
+        background-color: #d4c9b5;
+      }
+      .reading-tab.active {
+        background-color: #2c5530;
+        color: white;
+        border-color: #2c5530;
+      }
+      .reading-content-area {
+        background-color: white;
+        border: 1px solid #d4c9b5;
+        border-radius: 0 8px 8px 8px;
+        padding: 20px;
+        max-height: 400px;
+        overflow-y: auto;
+      }
+      .reading-header {
+        margin-bottom: 15px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid #eee;
+      }
+      .reading-type {
+        font-size: 18px;
+        font-weight: bold;
+        color: #2c5530;
+      }
+      .reading-reference {
+        font-size: 14px;
+        color: #666;
+        margin-left: 10px;
+      }
+      .reading-text {
+        line-height: 1.8;
+        font-size: 15px;
+        white-space: pre-wrap;
+      }
+      .reading-text p {
+        margin: 0 0 10px 0;
+      }
+      .reading-placeholder {
+        color: #999;
+        font-style: italic;
+        text-align: center;
+        padding: 40px;
+      }
+      .spinner {
+        display: inline-block;
+        width: 20px;
+        height: 20px;
+        border: 3px solid #f3f3f3;
+        border-top: 3px solid #2c5530;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin-right: 10px;
+        vertical-align: middle;
+      }
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
     </style>
   </head>
   <body>
     <h1>Cyber Bible</h1>
 
+    <!-- Cover Generation Section -->
+    <div class="cover-section">
+      <h2>Cover Image Generation (Midjourney)</h2>
+
+      <div class="controls">
+        <input type="date" id="input_date" name="creation_date" />
+        <button id="load-readings-btn">Load Readings</button>
+      </div>
+
+      <div class="reading-select">
+        <label for="reading-select">Select reading for cover:</label>
+        <select id="reading-select" disabled>
+          <option value="">-- Load readings first --</option>
+        </select>
+        <button id="generate-prompt-btn" disabled>Generate Prompt</button>
+        <button id="generate-variations-btn" class="secondary" disabled>Generate 3 Variations</button>
+      </div>
+
+      <div id="prompt-variations-container" class="prompt-variations" style="display: none;"></div>
+
+      <div class="prompt-area">
+        <label for="midjourney-prompt">Midjourney Prompt (edit as needed):</label>
+        <textarea id="midjourney-prompt" placeholder="Prompt will appear here after generation..."></textarea>
+      </div>
+
+      <div class="controls">
+        <button id="generate-cover-btn" disabled>Generate Cover Image</button>
+      </div>
+
+      <div id="cover-status"></div>
+      <img id="cover-preview" style="display: none;" />
+    </div>
+
+    <!-- Reading Display Section -->
+    <div class="reading-display-section">
+      <h2>Reading Preview</h2>
+      <div id="reading-tabs" class="reading-tabs">
+        <span class="reading-placeholder">Load readings to see available texts</span>
+      </div>
+      <div id="reading-content-area" class="reading-content-area" style="display: none;">
+        <div class="reading-header">
+          <span id="reading-type" class="reading-type"></span>
+          <span id="reading-reference" class="reading-reference"></span>
+        </div>
+        <div id="reading-text" class="reading-text"></div>
+      </div>
+    </div>
+
+    <!-- Reading Graphics Section -->
+    <h2>Reading Graphics</h2>
     <div class="controls">
-      <input type="date" id="input_date" name="creation_date" />
       <input type="number" id="verse_break" name="verse" min="0" value="0" placeholder="Verse break" />
       <button class="posts">Create post</button>
       <button class="english_readings">English readings</button>

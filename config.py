@@ -109,3 +109,20 @@ LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 # =============================================================================
 
 SESSION_FILE = BASE_DIR / "session.json"
+
+# =============================================================================
+# MIDJOURNEY API (Discord-based, unofficial)
+# WARNING: Using this violates Midjourney ToS. Use at your own risk.
+# =============================================================================
+
+DISCORD_AUTH_TOKEN = os.getenv("DISCORD_AUTH_TOKEN", "")
+MJ_APPLICATION_ID = os.getenv("MJ_APPLICATION_ID", "")
+MJ_GUILD_ID = os.getenv("MJ_GUILD_ID", "")
+MJ_CHANNEL_ID = os.getenv("MJ_CHANNEL_ID", "")
+MJ_VERSION = os.getenv("MJ_VERSION", "")
+MJ_ID = os.getenv("MJ_ID", "")
+
+# Rate limiting (seconds) - helps avoid detection
+MJ_DELAY_MIN = int(os.getenv("MJ_DELAY_MIN", "5"))
+MJ_DELAY_MAX = int(os.getenv("MJ_DELAY_MAX", "15"))
+
