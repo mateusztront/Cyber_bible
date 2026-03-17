@@ -219,7 +219,10 @@ document.getElementById('generate-variations-btn').onclick = async function() {
     }
 };
 
-// Generate cover image
+// Grid selection state
+let currentGridData = null;
+
+// Generate cover grid (shows 4 images for selection)
 document.getElementById('generate-cover-btn').onclick = async function() {
     const thedate = document.getElementById('input_date').value;
     const prompt = document.getElementById('midjourney-prompt').value.trim();
@@ -236,29 +239,86 @@ document.getElementById('generate-cover-btn').onclick = async function() {
 
     // Disable button during generation
     this.disabled = true;
-    showLoading('Generating cover image via Midjourney... This may take 1-2 minutes.');
+    showLoading('Generating 4 image options via Midjourney... This may take 1-2 minutes.');
+
+    // Hide previous results
+    document.getElementById('grid-preview-container').style.display = 'none';
+    document.getElementById('cover-preview').style.display = 'none';
 
     try {
-        const result = await eel.generate_cover_image(thedate, prompt)();
+        const result = await eel.generate_cover_grid(thedate, prompt)();
 
-        if (result.startsWith('Error:')) {
-            showStatus(result, 'error');
+        if (result.error) {
+            showStatus('Error: ' + result.error, 'error');
             this.disabled = false;
-        } else {
-            // Show the generated image
-            document.getElementById('cover-preview').src = result + '?t=' + Date.now();
-            document.getElementById('cover-preview').style.display = 'block';
-
-            showStatus('Cover image generated successfully!', 'success');
-            this.disabled = false;
+            return;
         }
 
+        // Store grid data for upscale
+        currentGridData = {
+            messageId: result.message_id,
+            buttons: result.buttons,
+            thedate: thedate
+        };
+
+        // Show the grid
+        document.getElementById('grid-image').src = result.grid_url;
+        document.getElementById('grid-preview-container').style.display = 'block';
+
+        showStatus('Click on the image (1-4) you want to use as cover.', 'success');
+        this.disabled = false;
+
     } catch (error) {
-        console.error('Error generating cover:', error);
-        showStatus('Error generating cover. Check console for details.', 'error');
+        console.error('Error generating grid:', error);
+        showStatus('Error generating grid. Check console for details.', 'error');
         this.disabled = false;
     }
 };
+
+// Handle grid quadrant clicks
+document.querySelectorAll('.grid-quadrant').forEach(quadrant => {
+    quadrant.onclick = async function() {
+        if (!currentGridData) {
+            showStatus('No grid data. Generate a grid first.', 'warning');
+            return;
+        }
+
+        const variant = this.dataset.variant;
+        const customId = currentGridData.buttons[variant];
+
+        if (!customId) {
+            showStatus('Button data not found for ' + variant, 'error');
+            return;
+        }
+
+        showLoading('Upscaling selected image...');
+
+        try {
+            const result = await eel.upscale_cover(
+                currentGridData.thedate,
+                currentGridData.messageId,
+                customId
+            )();
+
+            if (result.startsWith('Error:')) {
+                showStatus(result, 'error');
+                return;
+            }
+
+            // Hide grid, show final cover
+            document.getElementById('grid-preview-container').style.display = 'none';
+            document.getElementById('cover-preview').src = result + '?t=' + Date.now();
+            document.getElementById('cover-preview').style.display = 'block';
+
+            showStatus('Cover image saved!', 'success');
+            currentGridData = null;
+
+        } catch (error) {
+            console.error('Error upscaling:', error);
+            showStatus('Error upscaling. Check console for details.', 'error');
+        }
+    };
+});
 
 // =============================================================================
 // EXISTING FUNCTIONS

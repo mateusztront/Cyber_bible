@@ -30,7 +30,7 @@ ATMOSPHERE_TEMPLATES = [
 ]
 
 # Base prompt structure
-BASE_PROMPT_TEMPLATE = "{subject}, {style}, {atmosphere}, sacred Catholic liturgical art --ar 4:5 --v 6"
+BASE_PROMPT_TEMPLATE = "{subject}, {style}, {atmosphere}, sacred Catholic liturgical art --ar 1:1"
 
 
 def extract_theme_keywords(reading_text: str) -> List[str]:
@@ -212,4 +212,4 @@ def get_simple_prompt_template() -> str:
     """
     Return a simple editable prompt template for manual entry.
     """
-    return "sacred Catholic art, [YOUR SUBJECT HERE], Renaissance painting style, divine light, ethereal atmosphere --ar 4:5 --v 6"
+    return "sacred Catholic art, [YOUR SUBJECT HERE], Renaissance painting style, divine light, ethereal atmosphere --ar 1:1"

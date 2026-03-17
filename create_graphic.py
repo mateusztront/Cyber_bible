@@ -470,12 +470,31 @@ def readings_eng(thedate: str) -> List[List[str]]:
         return []
 
     soup = BeautifulSoup(response.content, "html.parser")
-    content_sections = soup.find_all("div", "section__content")[:2]
+    content_sections = soup.find_all("div", "section__content")
 
     return [
         [line.replace('"', "") for line in section.get_text().split("\n")]
         for section in content_sections
     ]
+
+
+@eel.expose
+def get_english_reading_text(thedate: str, reading_index: int = 0) -> str:
+    """
+    Get English reading text for prompt generation.
+
+    Args:
+        thedate: Date string in YYYY-MM-DD format
+        reading_index: 0=First Reading, 1=Psalm, 2=Second Reading/Gospel, etc.
+
+    Returns:
+        Formatted reading text as single string
+    """
+    readings = readings_eng(thedate)
+    if readings and len(readings) > reading_index:
+        lines = [l.strip() for l in readings[reading_index] if l.strip()]
+        return "\n".join(lines)
+    return ""
 
 
 @eel.expose
@@ -701,6 +720,82 @@ def check_cover_exists(thedate: str) -> bool:
     """Check if a cover image already exists for the given date."""
     cover_path = WEB_DIR / thedate / "mateusztront.jpg"
     return cover_path.exists()
+
+
+def _extract_upscale_buttons(components: list) -> dict:
+    """Extract U1-U4 button custom_ids from Midjourney response components."""
+    buttons = {}
+    for row in components:
+        if "components" in row:
+            for button in row["components"]:
+                label = button.get("label", "")
+                if label in ["U1", "U2", "U3", "U4"]:
+                    buttons[label] = button.get("custom_id", "")
+    return buttons
+
+
+@eel.expose
+def generate_cover_grid(thedate: str, prompt: str) -> dict:
+    """
+    Generate 4-image grid via Midjourney without upscaling.
+
+    Returns dict with grid_url, message_id, and buttons for user selection.
+    """
+    try:
+        logger.info(f"Generating grid for {thedate} with prompt: {prompt[:50]}...")
+
+        output_path = WEB_DIR / thedate
+        output_path.mkdir(parents=True, exist_ok=True)
+
+        mj = MidjourneyWrapper()
+        result = mj.generate_grid(prompt)
+
+        grid_url = result.get("attachments", [{}])[0].get("url", "")
+        message_id = result.get("id", "")
+        buttons = _extract_upscale_buttons(result.get("components", []))
+
+        logger.info(f"Grid generated: {grid_url[:50]}...")
+
+        return {
+            "grid_url": grid_url,
+            "message_id": message_id,
+            "buttons": buttons,
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to generate grid: {e}")
+        return {"error": str(e)}
+
+
+@eel.expose
+def upscale_cover(thedate: str, message_id: str, custom_id: str) -> str:
+    """
+    Upscale selected variant and save as cover image.
+
+    Args:
+        thedate: Date for output directory
+        message_id: Discord message ID from generate_cover_grid
+        custom_id: Button custom_id for selected variant (U1-U4)
+
+    Returns:
+        Path to saved image or error message
+    """
+    try:
+        logger.info(f"Upscaling variant for {thedate}...")
+
+        output_path = WEB_DIR / thedate
+        output_path.mkdir(parents=True, exist_ok=True)
+        save_path = output_path / "mateusztront.jpg"
+
+        mj = MidjourneyWrapper()
+        mj.upscale_variant(message_id, custom_id, save_path)
+
+        logger.info(f"Cover upscaled: {save_path}")
+        return f"/{thedate}/mateusztront.jpg"
+
+    except Exception as e:
+        logger.error(f"Failed to upscale: {e}")
+        return f"Error: {e}"
 
 
 if __name__ == "__main__":
