@@ -4,9 +4,11 @@ Handles login via session or credentials with proper error handling.
 """
 
 import logging
+import threading
 import time
 from pathlib import Path
 
+import eel
 from instagrapi import Client
 from instagrapi.exceptions import (
     LoginRequired,
@@ -27,6 +29,59 @@ from config import (
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+# Global variable to store 2FA code from UI
+_2fa_code = None
+_2fa_event = threading.Event()
+
+
+_2fa_needed = False
+
+
+@eel.expose
+def check_2fa_needed() -> bool:
+    """Check if 2FA code is needed (called by JS polling)."""
+    if _2fa_needed:
+        logger.info("check_2fa_needed() called - returning True")
+    return _2fa_needed
+
+
+@eel.expose
+def submit_2fa_code(code: str) -> None:
+    """Receive 2FA code from UI popup."""
+    global _2fa_code, _2fa_needed
+    _2fa_code = code.strip()
+    _2fa_needed = False
+    _2fa_event.set()
+    logger.info("2FA code received from UI")
+
+
+def _request_2fa_from_ui(timeout: int = 120) -> str:
+    """
+    Request 2FA code from UI popup.
+
+    Args:
+        timeout: Maximum seconds to wait for code
+
+    Returns:
+        2FA verification code or empty string on timeout
+    """
+    global _2fa_code, _2fa_event, _2fa_needed
+
+    # Reset state
+    _2fa_code = None
+    _2fa_event.clear()
+    _2fa_needed = True
+
+    logger.info("Requesting 2FA code from UI... (waiting for JS poll)")
+
+    # Wait for code
+    if _2fa_event.wait(timeout=timeout):
+        return _2fa_code or ""
+    else:
+        _2fa_needed = False
+        logger.warning("2FA code entry timed out")
+        return ""
 
 
 def _configure_client(client: Client) -> None:
@@ -100,8 +155,18 @@ def _login_via_credentials(client: Client, username: str, password: str) -> bool
 
     except TwoFactorRequired:
         logger.info("Two-factor authentication required")
-        print("Enter 2FA verification code: ", end="")
-        verification_code = input().strip()
+
+        # Request 2FA code via terminal input (V1 approach - works reliably)
+        print("\n" + "=" * 50)
+        print("INSTAGRAM 2FA REQUIRED")
+        print("Enter 6-digit code from SMS or authenticator app:")
+        print("=" * 50)
+        verification_code = input("Code: ").strip()
+
+        if not verification_code:
+            logger.error("No 2FA code provided")
+            return False
+
         time.sleep(2)  # Small delay before 2FA attempt
 
         try:

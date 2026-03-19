@@ -7,6 +7,114 @@ let selectedReadingName = '';
 let selectedReadingText = '';
 
 // =============================================================================
+// 2FA POPUP FUNCTIONS
+// =============================================================================
+
+// Poll for 2FA needed flag and show modal
+let polling2FA = false;
+let modal2FAShown = false;
+let pollCount = 0;
+
+async function poll2FANeeded() {
+    if (polling2FA || modal2FAShown) return;
+
+    // Check if eel is available
+    if (typeof eel === 'undefined' || typeof eel.check_2fa_needed !== 'function') {
+        return;
+    }
+
+    polling2FA = true;
+
+    try {
+        const needed = await eel.check_2fa_needed()();
+        pollCount++;
+
+        if (needed && !modal2FAShown) {
+            console.log('2FA NEEDED! Showing modal now...');
+            show2FAModal();
+        }
+    } catch (e) {
+        // Silently ignore poll errors
+    }
+
+    polling2FA = false;
+}
+
+function show2FAModal() {
+    modal2FAShown = true;
+    const modal = document.getElementById('2fa-modal');
+    const input = document.getElementById('2fa-code');
+    if (modal) {
+        modal.style.display = 'flex';
+        modal.classList.add('show');
+        if (input) {
+            input.value = '';
+            input.focus();
+        }
+        console.log('Modal should now be visible');
+    } else {
+        console.error('Modal element not found!');
+        // Fallback to prompt
+        const code = prompt('Instagram wymaga kodu 2FA.\nWprowadź 6-cyfrowy kod:');
+        if (code && code.trim().length >= 6) {
+            eel.submit_2fa_code(code.trim());
+        } else {
+            eel.submit_2fa_code('');
+        }
+        modal2FAShown = false;
+    }
+}
+
+function hide2FAModal() {
+    modal2FAShown = false;
+    const modal = document.getElementById('2fa-modal');
+    if (modal) {
+        modal.style.display = 'none';
+        modal.classList.remove('show');
+    }
+}
+
+// 2FA modal event handlers - set up when DOM is ready
+document.addEventListener('DOMContentLoaded', function() {
+    const submitBtn = document.getElementById('2fa-submit');
+    const cancelBtn = document.getElementById('2fa-cancel');
+    const codeInput = document.getElementById('2fa-code');
+
+    if (submitBtn) {
+        submitBtn.onclick = function() {
+            const code = codeInput.value.trim();
+            console.log('Submitting 2FA code:', code);
+            if (code.length >= 6) {
+                eel.submit_2fa_code(code);
+                hide2FAModal();
+            } else {
+                alert('Kod musi mieć co najmniej 6 znaków');
+            }
+        };
+    }
+
+    if (cancelBtn) {
+        cancelBtn.onclick = function() {
+            console.log('2FA cancelled');
+            eel.submit_2fa_code('');
+            hide2FAModal();
+        };
+    }
+
+    if (codeInput) {
+        codeInput.onkeypress = function(e) {
+            if (e.key === 'Enter') {
+                submitBtn.click();
+            }
+        };
+    }
+
+});
+
+// Start polling when page loads
+setInterval(poll2FANeeded, 500);
+
+// =============================================================================
 // COVER GENERATION FUNCTIONS
 // =============================================================================
 
@@ -136,7 +244,7 @@ document.getElementById('load-readings-btn').onclick = async function() {
     }
 };
 
-// Handle reading selection
+// Handle reading selection - load English text into prompt
 document.getElementById('reading-select').onchange = async function() {
     selectedReadingName = this.value;
 
@@ -146,12 +254,26 @@ document.getElementById('reading-select').onchange = async function() {
     }
 
     const thedate = document.getElementById('input_date').value;
+    showLoading('Loading English reading from Bible API...');
 
     try {
+        // Get Polish reading for display
         selectedReadingText = await eel.get_full_reading_text(thedate, selectedReadingName)();
-        showStatus(`Selected: ${selectedReadingName}`, 'info');
+
+        // Get English reading text using Bible API (based on Polish reference)
+        const englishText = await eel.get_english_reading_text(thedate, selectedReadingName)();
+
+        if (englishText && !englishText.startsWith('Error') && !englishText.startsWith('Could not')) {
+            document.getElementById('midjourney-prompt').value = englishText + ' --ar 1:1';
+            document.getElementById('generate-cover-btn').disabled = false;
+            showStatus(`Selected: ${selectedReadingName} - English text loaded for editing`, 'success');
+        } else {
+            document.getElementById('midjourney-prompt').value = '';
+            showStatus(`${selectedReadingName}: ${englishText}`, 'warning');
+        }
     } catch (error) {
         console.error('Error getting reading text:', error);
+        showStatus('Error loading reading text', 'error');
     }
 };
 

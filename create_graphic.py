@@ -5,6 +5,7 @@ Handles scraping liturgical readings, generating images, and publishing to Insta
 
 import logging
 import os
+import re
 from functools import reduce
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -37,6 +38,30 @@ from midjourney_wrapper import MidjourneyWrapper
 from prompt_generator import generate_midjourney_prompt, generate_prompt_variations
 
 logger = logging.getLogger(__name__)
+
+# Polish to English Bible book name mapping
+POLISH_TO_ENGLISH_BOOKS = {
+    # Old Testament
+    "Rdz": "Genesis", "Wj": "Exodus", "Kpł": "Leviticus", "Lb": "Numbers",
+    "Pwt": "Deuteronomy", "Joz": "Joshua", "Sdz": "Judges", "Rt": "Ruth",
+    "1 Sm": "1 Samuel", "2 Sm": "2 Samuel", "1 Krl": "1 Kings", "2 Krl": "2 Kings",
+    "1 Krn": "1 Chronicles", "2 Krn": "2 Chronicles", "Ezd": "Ezra", "Ne": "Nehemiah",
+    "Tb": "Tobit", "Jdt": "Judith", "Est": "Esther", "1 Mch": "1 Maccabees",
+    "2 Mch": "2 Maccabees", "Hi": "Job", "Ps": "Psalms", "Prz": "Proverbs",
+    "Koh": "Ecclesiastes", "Pnp": "Song of Solomon", "Mdr": "Wisdom", "Syr": "Sirach",
+    "Iz": "Isaiah", "Jr": "Jeremiah", "Lm": "Lamentations", "Ba": "Baruch",
+    "Ez": "Ezekiel", "Dn": "Daniel", "Oz": "Hosea", "Jl": "Joel", "Am": "Amos",
+    "Ab": "Obadiah", "Jon": "Jonah", "Mi": "Micah", "Na": "Nahum", "Ha": "Habakkuk",
+    "So": "Zephaniah", "Ag": "Haggai", "Za": "Zechariah", "Ml": "Malachi",
+    # New Testament
+    "Mt": "Matthew", "Mk": "Mark", "Łk": "Luke", "J": "John",
+    "Dz": "Acts", "Rz": "Romans", "1 Kor": "1 Corinthians", "2 Kor": "2 Corinthians",
+    "Ga": "Galatians", "Ef": "Ephesians", "Flp": "Philippians", "Kol": "Colossians",
+    "1 Tes": "1 Thessalonians", "2 Tes": "2 Thessalonians", "1 Tm": "1 Timothy",
+    "2 Tm": "2 Timothy", "Tt": "Titus", "Flm": "Philemon", "Hbr": "Hebrews",
+    "Jk": "James", "1 P": "1 Peter", "2 P": "2 Peter", "1 J": "1 John",
+    "2 J": "2 John", "3 J": "3 John", "Jud": "Jude", "Ap": "Revelation",
+}
 
 
 def _create_background() -> Image.Image:
@@ -179,19 +204,22 @@ def _parse_readings(content_list: List[str]) -> Dict[str, List[str]]:
                 if item == "":
                     continue
                 if item == "albo:":
-                    content_dic[cut_points[0]] = staging_list
-                    staging_list = []
-                    del cut_points[0]
+                    if cut_points:
+                        content_dic[cut_points[0]] = staging_list
+                        staging_list = []
+                        del cut_points[0]
                     break
                 if item not in cut_points:
                     staging_list.append(item)
                 else:
-                    content_dic[cut_points[0]] = staging_list
-                    staging_list = []
-                    del cut_points[0]
+                    if cut_points:
+                        content_dic[cut_points[0]] = staging_list
+                        staging_list = []
+                        del cut_points[0]
                     break
 
-            content_dic[cut_points[0]] = staging_list
+            if cut_points:
+                content_dic[cut_points[0]] = staging_list
 
     return content_dic
 
@@ -260,61 +288,209 @@ def _generate_reading_images(
     output_path: Path,
     verse_break: int,
 ) -> List[str]:
-    """Generate images for all readings."""
+    """Generate images for all readings with smart auto-pagination."""
     posts_list = []
 
     for reading_name in content_dic.keys():
         if reading_name == "PSALM RESPONSORYJNY":
             continue
 
-        font_size = FONT_SIZE_DEFAULT
-        pagination_font_size = FONT_SIZE_DEFAULT
-        result = draw_text(content_dic, background, reading_name, font_size)
-
-        # Check if text fits on single page
-        if result["drawn_y"] <= IMAGE_SIZE - 20:
-            result["picture"].save(output_path / f"{reading_name}.jpg")
-            posts_list.append(f"{reading_name}.jpg")
-            continue
-
-        # Try reducing font size first
-        while result["drawn_y"] > IMAGE_SIZE - 20 and font_size >= FONT_SIZE_MIN:
-            font_size -= 1
-            result = draw_text(content_dic, background, reading_name, font_size)
-
-        if result["drawn_y"] <= IMAGE_SIZE - 20:
-            result["picture"].save(output_path / f"{reading_name}.jpg")
-            posts_list.append(f"{reading_name}.jpg")
-            continue
-
-        # Need pagination
         reading_content = content_dic[reading_name]
-        effective_break = verse_break if verse_break > 0 else 4
+        font_size = FONT_SIZE_DEFAULT
 
-        if len(reading_content) > 20:
-            # 4-page pagination for long readings
-            pages = _create_four_page_pagination(
-                reading_name, reading_content, effective_break
-            )
-            images = _render_four_pages(background, pages, pagination_font_size)
+        # Calculate optimal pagination
+        num_pages, optimal_font, pages = _calculate_optimal_pagination(
+            reading_content, font_size
+        )
 
-            for i, (name, img_result) in enumerate(images.items()):
-                filename = f"{reading_name}{i + 1}.jpg"
-                img_result["picture"].save(output_path / filename)
-                posts_list.append(filename)
+        logger.info(f"{reading_name}: {num_pages} page(s), font size {optimal_font}")
+
+        if num_pages == 1:
+            # Single page - use optimal font calculated by pagination
+            result = draw_text(content_dic, background, reading_name, optimal_font)
+            result["picture"].save(output_path / f"{reading_name}.jpg")
+            posts_list.append(f"{reading_name}.jpg")
+
         else:
-            # 2-page pagination
-            pages = _create_two_page_pagination(
-                reading_name, reading_content, effective_break
+            # Multi-page - render each page with optimal font
+            rendered_pages = _render_smart_pages(
+                background, reading_name, pages, optimal_font
             )
-            images = _render_two_pages(background, pages, pagination_font_size)
 
-            for i, (name, img_result) in enumerate(images.items()):
+            for i, img_result in enumerate(rendered_pages):
                 filename = f"{reading_name}{i + 1}.jpg"
                 img_result["picture"].save(output_path / filename)
                 posts_list.append(filename)
 
     return posts_list
+
+
+def _render_smart_pages(
+    background: Image.Image,
+    reading_name: str,
+    pages: List[List[str]],
+    font_size: int
+) -> List[dict]:
+    """
+    Render multiple pages with consistent font size.
+
+    Args:
+        background: Background image
+        reading_name: Name of the reading (for first page header)
+        pages: List of content for each page
+        font_size: Starting font size
+
+    Returns:
+        List of rendered page results
+    """
+    num_pages = len(pages)
+    results = []
+
+    # First render pass
+    for i, page_content in enumerate(pages):
+        if i == 0:
+            # First page with header
+            page_data = [reading_name] + page_content
+            result = draw_text_pagination_first(background, page_data, font_size=font_size)
+        elif i == num_pages - 1:
+            # Last page with closing
+            result = draw_text_pagination_second(background, page_content, font_size=font_size)
+        else:
+            # Middle page
+            result = draw_text_pagination_middle(background, page_content, font_size=font_size)
+
+        results.append(result)
+
+    # Check if all pages fit, reduce font size if needed
+    while any(r["drawn_y"] > IMAGE_SIZE - 20 for r in results) and font_size >= FONT_SIZE_MIN:
+        font_size -= 1
+        results = []
+
+        for i, page_content in enumerate(pages):
+            if i == 0:
+                page_data = [reading_name] + page_content
+                result = draw_text_pagination_first(background, page_data, font_size=font_size)
+            elif i == num_pages - 1:
+                result = draw_text_pagination_second(background, page_content, font_size=font_size)
+            else:
+                result = draw_text_pagination_middle(background, page_content, font_size=font_size)
+
+            results.append(result)
+
+    logger.info(f"  Final font size: {font_size}")
+    return results
+
+
+def _estimate_text_height(content: List[str], font_size: int, is_first_page: bool = False) -> int:
+    """
+    Estimate the height needed to render content at given font size.
+
+    Args:
+        content: List of paragraphs/lines
+        font_size: Font size to use
+        is_first_page: If True, accounts for header space
+
+    Returns:
+        Estimated pixel height
+    """
+    import textwrap
+
+    line_height = int(1.2 * font_size)
+    width = int(75 - 0.325 * (25 / 12 * font_size))
+
+    total_lines = 0
+
+    # Header takes ~3 lines on first page
+    if is_first_page:
+        total_lines += 4
+
+    for paragraph in content:
+        wrapped = textwrap.wrap(paragraph, width=width)
+        total_lines += max(len(wrapped), 1)
+
+    return total_lines * line_height + (font_size * 2)  # Add margin
+
+
+def _calculate_optimal_pagination(
+    content: List[str],
+    font_size: int,
+    max_height: int = IMAGE_SIZE - 40
+) -> Tuple[int, int, List[List[str]]]:
+    """
+    Calculate optimal number of pages and content division.
+
+    SMART PAGINATION: First tries to reduce font size down to FONT_SIZE_MIN
+    before splitting into multiple pages. Only splits when content truly
+    cannot fit on a single page even at minimum font size.
+
+    Returns:
+        Tuple of (num_pages, optimal_font_size, list of content per page)
+    """
+    # Content structure: [reference, subtitle, intro, body..., closing]
+    # First page gets: reference, subtitle, intro + some body
+    # Middle pages get: body only
+    # Last page gets: body + closing
+
+    header_content = content[:3]  # reference, subtitle, intro
+    body_content = content[3:-1]  # body paragraphs
+    closing = content[-1:]  # closing phrase
+
+    # SMART: Try reducing font size BEFORE splitting into multiple pages
+    current_font = font_size
+    while current_font >= FONT_SIZE_MIN:
+        total_height = _estimate_text_height(content, current_font, is_first_page=True)
+        if total_height <= max_height:
+            return 1, current_font, [content]
+        current_font -= 2  # Reduce by 2 for faster iteration
+
+    # Content doesn't fit even at minimum font size - need to split
+    # Use minimum font size for multi-page layout
+    font_size = FONT_SIZE_MIN
+
+    # Calculate how many pages we need
+    # First page has header overhead, estimate body capacity
+    first_page_body_capacity = (max_height - _estimate_text_height(header_content, font_size, True)) // (int(1.2 * font_size) * 2)
+    middle_page_capacity = max_height // (int(1.2 * font_size) * 2)
+    last_page_overhead = _estimate_text_height(closing, font_size) + font_size * 2
+
+    # Calculate paragraphs per page
+    total_body_paragraphs = len(body_content)
+
+    if total_body_paragraphs <= first_page_body_capacity + middle_page_capacity:
+        # 2 pages enough
+        num_pages = 2
+        split_point = max(1, total_body_paragraphs // 2)
+
+        page1_body = body_content[:split_point]
+        page2_body = body_content[split_point:]
+
+        pages = [
+            header_content + page1_body,
+            page2_body + closing
+        ]
+    elif total_body_paragraphs <= first_page_body_capacity + 2 * middle_page_capacity:
+        # 3 pages
+        num_pages = 3
+        third = max(1, total_body_paragraphs // 3)
+
+        pages = [
+            header_content + body_content[:third],
+            body_content[third:2*third],
+            body_content[2*third:] + closing
+        ]
+    else:
+        # 4 pages
+        num_pages = 4
+        quarter = max(1, total_body_paragraphs // 4)
+
+        pages = [
+            header_content + body_content[:quarter],
+            body_content[quarter:2*quarter],
+            body_content[2*quarter:3*quarter],
+            body_content[3*quarter:] + closing
+        ]
+
+    return num_pages, font_size, pages
 
 
 def _create_two_page_pagination(
@@ -478,23 +654,143 @@ def readings_eng(thedate: str) -> List[List[str]]:
     ]
 
 
-@eel.expose
-def get_english_reading_text(thedate: str, reading_index: int = 0) -> str:
+def _parse_polish_reference(reference: str) -> Optional[str]:
     """
-    Get English reading text for prompt generation.
+    Parse Polish Bible reference to English format for bible-api.com.
+
+    Example: "J 5, 1-16" -> "John 5:1-16"
+             "Rdz 1, 1-5" -> "Genesis 1:1-5"
+    """
+    # Clean up the reference
+    ref = reference.strip()
+
+    # Pattern: Book Chapter, Verses (e.g., "J 5, 1-16" or "1 Kor 12, 3-7")
+    # Handle books with numbers like "1 Kor", "2 Sm"
+    pattern = r"^(\d?\s?[A-Za-zżźćńółęąśŻŹĆŃÓŁĘĄŚ]+)\s+(\d+),?\s*([\d\-\.a-z]+)"
+    match = re.match(pattern, ref, re.IGNORECASE)
+
+    if not match:
+        logger.warning(f"Could not parse reference: {ref}")
+        return None
+
+    book_pl = match.group(1).strip()
+    chapter = match.group(2)
+    verses_raw = match.group(3).replace(" ", "")
+
+    # Strip letter suffixes (a, b, c) from verse numbers - API doesn't support them
+    verses_raw = re.sub(r'[a-z]', '', verses_raw)
+
+    # Handle complex verse references (e.g., "16.18-21.24" -> "16-24")
+    # Bible API only supports simple ranges, so extract min and max verse
+    all_numbers = re.findall(r'\d+', verses_raw)
+    if all_numbers:
+        min_verse = min(int(n) for n in all_numbers)
+        max_verse = max(int(n) for n in all_numbers)
+        if min_verse == max_verse:
+            verses = str(min_verse)
+        else:
+            verses = f"{min_verse}-{max_verse}"
+    else:
+        verses = verses_raw
+
+    # Find English book name
+    book_en = POLISH_TO_ENGLISH_BOOKS.get(book_pl)
+    if not book_en:
+        # Try case-insensitive match
+        for pl, en in POLISH_TO_ENGLISH_BOOKS.items():
+            if pl.lower() == book_pl.lower():
+                book_en = en
+                break
+
+    if not book_en:
+        logger.warning(f"Unknown book abbreviation: {book_pl}")
+        return None
+
+    return f"{book_en} {chapter}:{verses}"
+
+
+def _fetch_english_bible_text(reference: str) -> Optional[str]:
+    """
+    Fetch English Bible text from bible-api.com.
+
+    Args:
+        reference: English Bible reference (e.g., "John 5:1-16")
+
+    Returns:
+        Bible text as string, or None on error
+    """
+    try:
+        # bible-api.com format: https://bible-api.com/john+3:16
+        url = f"https://bible-api.com/{reference.replace(' ', '+')}"
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+
+        data = response.json()
+        text = None
+        if "text" in data:
+            text = data["text"].strip()
+        elif "verses" in data:
+            # Combine verses if returned as array
+            text = " ".join(v.get("text", "") for v in data["verses"]).strip()
+
+        if text:
+            # Clean text for Midjourney - remove quotation marks that cause text rendering
+            text = text.replace('"', '').replace("'", '').replace('"', '').replace('"', '')
+            text = text.replace("'", "").replace("'", "")
+            # Remove verse numbers
+            text = re.sub(r'\d+\s*', '', text)
+            return text.strip()
+
+        return None
+    except Exception as e:
+        logger.error(f"Failed to fetch Bible text for {reference}: {e}")
+        return None
+
+
+@eel.expose
+def get_english_reading_text(thedate: str, reading_name: str) -> str:
+    """
+    Get English reading text by parsing Polish reference and fetching from Bible API.
 
     Args:
         thedate: Date string in YYYY-MM-DD format
-        reading_index: 0=First Reading, 1=Psalm, 2=Second Reading/Gospel, etc.
+        reading_name: Polish reading name (e.g., "EWANGELIA", "PIERWSZE CZYTANIE")
 
     Returns:
-        Formatted reading text as single string
+        English Bible text for the reading
     """
-    readings = readings_eng(thedate)
-    if readings and len(readings) > reading_index:
-        lines = [l.strip() for l in readings[reading_index] if l.strip()]
-        return "\n".join(lines)
-    return ""
+    try:
+        # Get Polish reading to extract reference
+        content_dic = _get_readings_dict(thedate)
+
+        if reading_name not in content_dic:
+            return f"Reading '{reading_name}' not found"
+
+        reading_lines = content_dic[reading_name]
+        if not reading_lines:
+            return "No reading content"
+
+        # First line contains the reference (e.g., "J 5, 1-16")
+        polish_ref = reading_lines[0]
+        logger.info(f"Polish reference: {polish_ref}")
+
+        # Parse to English format
+        english_ref = _parse_polish_reference(polish_ref)
+        if not english_ref:
+            return f"Could not parse reference: {polish_ref}"
+
+        logger.info(f"English reference: {english_ref}")
+
+        # Fetch from Bible API
+        english_text = _fetch_english_bible_text(english_ref)
+        if not english_text:
+            return f"Could not fetch text for: {english_ref}"
+
+        return english_text
+
+    except Exception as e:
+        logger.error(f"Failed to get English reading: {e}")
+        return f"Error: {e}"
 
 
 @eel.expose

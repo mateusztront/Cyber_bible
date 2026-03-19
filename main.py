@@ -20,17 +20,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Import exposed functions to register them with eel
+# Ensure web directory exists
+WEB_DIR.mkdir(parents=True, exist_ok=True)
+
+# Initialize Eel BEFORE importing modules with @eel.expose decorators
+eel.init(str(WEB_DIR))
+
+# Now import exposed functions - @eel.expose will register correctly
 from create_graphic import draw_post, readings_eng, readings_pol, publish
+from login import check_2fa_needed, submit_2fa_code
 
 
 def main():
     """Initialize and start the Eel application."""
-    # Ensure web directory exists
-    WEB_DIR.mkdir(parents=True, exist_ok=True)
-
-    # Initialize Eel with web folder
-    eel.init(str(WEB_DIR))
 
     logger.info("Starting Cyber Bible application")
     logger.info(f"Web directory: {WEB_DIR}")
