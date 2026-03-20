@@ -43,6 +43,7 @@ FONT_FALLBACK_BOLD = "arialbd.ttf"
 
 IMAGE_SIZE = 1080
 FONT_SIZE_DEFAULT = 44
+FONT_SIZE_MAX = 60  # Maximum font size for autofit
 FONT_SIZE_PSALM = 34
 FONT_SIZE_MIN = 30  # Minimum font size for pagination
 

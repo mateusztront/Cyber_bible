@@ -19,6 +19,7 @@ from config import (
     BACKGROUND_IMAGE,
     IMAGE_SIZE,
     FONT_SIZE_DEFAULT,
+    FONT_SIZE_MAX,
     FONT_SIZE_PSALM,
     FONT_SIZE_MIN,
     WEB_DIR,
@@ -396,19 +397,20 @@ def _estimate_text_height(content: List[str], font_size: int, is_first_page: boo
     import textwrap
 
     line_height = int(1.2 * font_size)
-    width = int(75 - 0.325 * (25 / 12 * font_size))
+    # Conservative width estimate to avoid overflow
+    width = int(70 - 0.35 * (25 / 12 * font_size))
 
     total_lines = 0
 
     # Header takes ~3 lines on first page
     if is_first_page:
-        total_lines += 4
+        total_lines += 3
 
     for paragraph in content:
         wrapped = textwrap.wrap(paragraph, width=width)
         total_lines += max(len(wrapped), 1)
 
-    return total_lines * line_height + (font_size * 2)  # Add margin
+    return total_lines * line_height + (font_size * 2)  # Safe margin
 
 
 def _calculate_optimal_pagination(
@@ -419,9 +421,9 @@ def _calculate_optimal_pagination(
     """
     Calculate optimal number of pages and content division.
 
-    SMART PAGINATION: First tries to reduce font size down to FONT_SIZE_MIN
-    before splitting into multiple pages. Only splits when content truly
-    cannot fit on a single page even at minimum font size.
+    SMART AUTOFIT:
+    - If content fits on 1 page with font >= 48, use 1 page
+    - Otherwise split into 2 pages and find largest font that fills both well
 
     Returns:
         Tuple of (num_pages, optimal_font_size, list of content per page)
@@ -435,16 +437,31 @@ def _calculate_optimal_pagination(
     body_content = content[3:-1]  # body paragraphs
     closing = content[-1:]  # closing phrase
 
-    # SMART: Try reducing font size BEFORE splitting into multiple pages
-    current_font = font_size
-    while current_font >= FONT_SIZE_MIN:
-        total_height = _estimate_text_height(content, current_font, is_first_page=True)
+    # Try 1 page only if it fits with a GOOD font size (>= 48)
+    for test_font in range(FONT_SIZE_MAX, 46, -2):
+        total_height = _estimate_text_height(content, test_font, is_first_page=True)
         if total_height <= max_height:
-            return 1, current_font, [content]
-        current_font -= 2  # Reduce by 2 for faster iteration
+            return 1, test_font, [content]
 
-    # Content doesn't fit even at minimum font size - need to split
-    # Use minimum font size for multi-page layout
+    # Content needs 2 pages - find largest font for 2-page layout
+    # Put more content on first page (60/40 split)
+    split_point = max(1, int(len(body_content) * 0.6))
+    page1_body = body_content[:split_point]
+    page2_body = body_content[split_point:]
+
+    pages = [
+        header_content + page1_body,
+        page2_body + closing
+    ]
+
+    # Find largest font that fits both pages
+    for test_font in range(FONT_SIZE_MAX, FONT_SIZE_MIN - 1, -2):
+        page1_height = _estimate_text_height(pages[0], test_font, is_first_page=True)
+        page2_height = _estimate_text_height(pages[1], test_font, is_first_page=False)
+        if page1_height <= max_height and page2_height <= max_height:
+            return 2, test_font, pages
+
+    # Fallback to minimum font
     font_size = FONT_SIZE_MIN
 
     # Calculate how many pages we need
