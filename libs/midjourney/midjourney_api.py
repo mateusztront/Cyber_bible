@@ -68,16 +68,19 @@ class MidjourneyApi:
         """
         logger.info(f"Sending /imagine prompt: {prompt[:50]}...")
 
+        # Record timestamp BEFORE sending command for verification
+        start_timestamp = time.time()
+
         # Send the /imagine command
         self._send_imagine_command(prompt)
 
         # Wait for generation to complete
-        start_time = time.time()
-        while time.time() - start_time < timeout:
+        while time.time() - start_timestamp < timeout:
             time.sleep(poll_interval)
 
             try:
-                result = self._get_latest_midjourney_message()
+                # Use prompt-matching verification to get correct image
+                result = self._get_matching_midjourney_message(prompt, start_timestamp)
                 if result and self._is_generation_complete(result):
                     logger.info("Image generation complete")
                     return result
@@ -100,18 +103,19 @@ class MidjourneyApi:
         """
         logger.info(f"Upscaling with button: {custom_id[:20]}...")
 
+        # Record timestamp BEFORE clicking for verification
+        start_timestamp = time.time()
+
         self._click_button(message_id, custom_id)
 
-        start_time = time.time()
-        while time.time() - start_time < timeout:
+        while time.time() - start_timestamp < timeout:
             time.sleep(10)
 
             try:
-                result = self._get_latest_midjourney_message()
-                if result and "attachments" in result:
-                    # Check if this is an upscaled image (single, not grid)
-                    if self._is_upscaled_image(result):
-                        return result
+                # Get upscale result with timestamp verification
+                result = self._get_upscale_result(message_id, start_timestamp)
+                if result:
+                    return result
             except Exception as e:
                 logger.warning(f"Error checking upscale: {e}")
 
@@ -252,6 +256,107 @@ class MidjourneyApi:
                 return msg
 
         return messages[0] if messages else None
+
+    def _get_matching_midjourney_message(self, prompt: str, after_timestamp: float) -> dict | None:
+        """
+        Get Midjourney message that matches our prompt and was created after timestamp.
+
+        This prevents downloading wrong images when multiple users generate in the same channel.
+
+        Args:
+            prompt: The prompt we sent (for content matching)
+            after_timestamp: Unix timestamp - only accept messages after this time
+
+        Returns:
+            Matching message dict, or None if not found
+        """
+        url = f"{self.DISCORD_API_BASE}/channels/{self.channel_id}/messages"
+
+        response = requests.get(url, headers=self._headers, timeout=30)
+        response.raise_for_status()
+
+        messages = response.json()
+
+        # Extract unique keywords from prompt for matching
+        prompt_keywords = self._extract_prompt_keywords(prompt)
+
+        for msg in messages:
+            author = msg.get("author", {})
+
+            # Must be from Midjourney bot
+            if not (author.get("bot", False) and "Midjourney" in author.get("username", "")):
+                continue
+
+            # Must be created after we sent the command
+            msg_timestamp = self._parse_discord_timestamp(msg.get("timestamp", ""))
+            if msg_timestamp < after_timestamp:
+                logger.debug(f"Skipping message - too old: {msg.get('id')}")
+                continue
+
+            # Must contain our prompt keywords in message content
+            content = msg.get("content", "").lower()
+            if prompt_keywords and prompt_keywords in content:
+                logger.debug(f"Found matching message: {msg.get('id')}")
+                return msg
+
+        return None
+
+    def _extract_prompt_keywords(self, prompt: str) -> str:
+        """
+        Extract first portion of prompt for matching.
+
+        Midjourney includes the prompt in message content, so we can verify
+        the message is for our specific prompt.
+        """
+        # Take first 30 chars, lowercase, for matching
+        return prompt[:30].lower().strip()
+
+    def _parse_discord_timestamp(self, timestamp_str: str) -> float:
+        """Parse Discord ISO timestamp to Unix timestamp."""
+        from datetime import datetime
+        try:
+            # Discord uses ISO 8601 format: 2024-01-15T10:30:00.000000+00:00
+            dt = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+            return dt.timestamp()
+        except Exception:
+            return 0
+
+    def _get_upscale_result(self, original_message_id: str, after_timestamp: float) -> dict | None:
+        """
+        Get upscale result that was created after our button click.
+
+        Args:
+            original_message_id: The message ID we clicked upscale on
+            after_timestamp: Only accept messages after this time
+
+        Returns:
+            Upscaled image message dict, or None if not ready
+        """
+        url = f"{self.DISCORD_API_BASE}/channels/{self.channel_id}/messages"
+
+        response = requests.get(url, headers=self._headers, timeout=30)
+        response.raise_for_status()
+
+        messages = response.json()
+
+        for msg in messages:
+            author = msg.get("author", {})
+
+            # Must be from Midjourney bot
+            if not (author.get("bot", False) and "Midjourney" in author.get("username", "")):
+                continue
+
+            # Must be created after we clicked the button
+            msg_timestamp = self._parse_discord_timestamp(msg.get("timestamp", ""))
+            if msg_timestamp < after_timestamp:
+                continue
+
+            # Must be an upscaled image (has attachments, no U1-U4 buttons)
+            if self._is_upscaled_image(msg):
+                logger.debug(f"Found upscale result: {msg.get('id')}")
+                return msg
+
+        return None
 
     def _is_generation_complete(self, message: dict) -> bool:
         """Check if image generation is complete (has U1-U4 buttons)."""
