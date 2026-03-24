@@ -4,6 +4,7 @@ Handles scraping liturgical readings, generating images, and publishing to Insta
 """
 
 import logging
+import math
 import os
 import re
 from functools import reduce
@@ -117,6 +118,100 @@ def _normalize_readings(content_list: List[str]) -> List[str]:
     """Normalize reading names and handle shorter/longer versions."""
     result = content_list.copy()
 
+    # Handle longer/shorter Gospel versions FIRST - prefer shorter, preserve subtitle
+    # Must run before replacements that change marker names
+    try:
+        if "EWANGELIA DŁUŻSZA" in result and "EWANGELIA KRÓTSZA" in result:
+            # Find longer Gospel section boundaries
+            longer_idx = result.index("EWANGELIA DŁUŻSZA")
+            longer_end = result.index("Oto słowo Pańskie.", longer_idx) + 1
+
+            # Extract subtitle from longer version
+            # Structure: marker → reference → [subtitle] → "Słowa Ewangelii..."
+            longer_subtitle = None
+            for i in range(longer_idx + 2, min(longer_idx + 4, longer_end)):
+                line = result[i].strip()
+                if line.startswith("Słowa Ewangelii"):
+                    break  # No subtitle found
+                if line:
+                    longer_subtitle = line
+                    break
+
+            # Find shorter Gospel section
+            shorter_idx = result.index("EWANGELIA KRÓTSZA")
+
+            # Check if shorter version is missing subtitle
+            # (line after reference immediately starts with "Słowa Ewangelii...")
+            shorter_needs_subtitle = False
+            for i in range(shorter_idx + 2, min(shorter_idx + 4, len(result))):
+                line = result[i].strip()
+                if line.startswith("Słowa Ewangelii"):
+                    shorter_needs_subtitle = True
+                    break
+                if line:
+                    break  # Has subtitle already
+
+            # Insert subtitle into shorter version if missing
+            if longer_subtitle and shorter_needs_subtitle:
+                for i in range(shorter_idx + 1, len(result)):
+                    if result[i].startswith("Słowa Ewangelii"):
+                        result.insert(i, longer_subtitle)
+                        logger.debug(f"Copied subtitle '{longer_subtitle}' to shorter Gospel")
+                        break
+
+            # Remove entire longer Gospel section
+            del result[longer_idx:longer_end]
+            logger.debug(f"Removed longer Gospel (lines {longer_idx}-{longer_end})")
+    except ValueError:
+        pass
+
+    # Handle longer/shorter First Reading versions - prefer shorter, preserve subtitle
+    # Must run before replacements that change marker names
+    try:
+        if "PIERWSZE CZYTANIE DŁUŻSZE" in result and "PIERWSZE CZYTANIE KRÓTSZE" in result:
+            # Find longer First Reading section boundaries
+            longer_idx = result.index("PIERWSZE CZYTANIE DŁUŻSZE")
+            longer_end = result.index("Oto słowo Boże.", longer_idx) + 1
+
+            # Extract subtitle from longer version
+            # Structure: marker → reference → [subtitle] → "Czytanie z Księgi..."
+            longer_subtitle = None
+            for i in range(longer_idx + 2, min(longer_idx + 5, longer_end)):
+                line = result[i].strip()
+                if line.startswith("Czytanie z"):
+                    break  # No subtitle found
+                if line:
+                    longer_subtitle = line
+                    break
+
+            # Find shorter First Reading section
+            shorter_idx = result.index("PIERWSZE CZYTANIE KRÓTSZE")
+            shorter_end = result.index("Oto słowo Boże.", shorter_idx) + 1
+
+            # Check if shorter version is missing subtitle
+            shorter_needs_subtitle = False
+            for i in range(shorter_idx + 2, min(shorter_idx + 5, shorter_end)):
+                line = result[i].strip()
+                if line.startswith("Czytanie z"):
+                    shorter_needs_subtitle = True
+                    break
+                if line:
+                    break  # Has subtitle already
+
+            # Insert subtitle into shorter version if missing
+            if longer_subtitle and shorter_needs_subtitle:
+                for i in range(shorter_idx + 1, shorter_end):
+                    if result[i].startswith("Czytanie z"):
+                        result.insert(i, longer_subtitle)
+                        logger.debug(f"Copied subtitle '{longer_subtitle}' to shorter First Reading")
+                        break
+
+            # Remove entire longer First Reading section
+            del result[longer_idx:longer_end]
+            logger.debug(f"Removed longer First Reading (lines {longer_idx}-{longer_end})")
+    except ValueError:
+        pass
+
     # Replacements for shorter versions
     replacements = [
         ("PIERWSZE CZYTANIE KRÓTSZE", "PIERWSZE CZYTANIE"),
@@ -133,22 +228,13 @@ def _normalize_readings(content_list: List[str]) -> List[str]:
                 result[i] = text.replace(old, new)
                 logger.debug(f"Replaced '{old}' with '{new}'")
 
-    # Handle longer versions - prefer shorter
+    # Fallback: Handle shorter first reading without longer version
     try:
         if "PIERWSZE CZYTANIE KRÓTSZE" in result:
             start = result.index("PIERWSZE CZYTANIE KRÓTSZE")
-            end = result.index("Oto słowo Boże", start) + 1
+            end = result.index("Oto słowo Boże.", start) + 1
             result = result[start:end]
             result[0] = result[0].replace("PIERWSZE CZYTANIE KRÓTSZE", "PIERWSZE CZYTANIE")
-    except ValueError:
-        pass
-
-    # Remove longer Gospel version if shorter exists
-    try:
-        longer_start = result.index("EWANGELIA DŁUŻSZA")
-        longer_end = result.index("Oto słowo Pańskie.", longer_start) + 1
-        del result[longer_start:longer_end]
-        result = result[: result.index("Oto słowo Pańskie.") + 1]
     except ValueError:
         pass
 
@@ -283,6 +369,17 @@ def _remove_pre_gospel_from_reading(content_dic: Dict[str, List[str]]) -> None:
         content_dic["DRUGIE CZYTANIE"] = reading[:-6]
 
 
+def _remove_liturgical_notes(content_dic: Dict[str, List[str]]) -> None:
+    """Remove liturgical year notes like 'W roku C...' from Gospel."""
+    if "EWANGELIA" not in content_dic:
+        return
+
+    content_dic["EWANGELIA"] = [
+        line for line in content_dic["EWANGELIA"]
+        if not line.strip().startswith("W roku")
+    ]
+
+
 def _generate_reading_images(
     content_dic: Dict[str, List[str]],
     background: Image.Image,
@@ -301,7 +398,7 @@ def _generate_reading_images(
 
         # Calculate optimal pagination
         num_pages, optimal_font, pages = _calculate_optimal_pagination(
-            reading_content, font_size
+            reading_content, font_size, reading_name=reading_name
         )
 
         logger.info(f"{reading_name}: {num_pages} page(s), font size {optimal_font}")
@@ -416,13 +513,15 @@ def _estimate_text_height(content: List[str], font_size: int, is_first_page: boo
 def _calculate_optimal_pagination(
     content: List[str],
     font_size: int,
-    max_height: int = IMAGE_SIZE - 40
+    max_height: int = IMAGE_SIZE - 40,
+    reading_name: str = ""
 ) -> Tuple[int, int, List[List[str]]]:
     """
     Calculate optimal number of pages and content division.
 
     SMART AUTOFIT:
-    - If content fits on 1 page with font >= 48, use 1 page
+    - If content fits on 1 page with font >= 30, use 1 page
+    - For PIERWSZE CZYTANIE: prefer 3-4 pages with larger fonts for readability
     - Otherwise split into 2 pages and find largest font that fills both well
 
     Returns:
@@ -437,15 +536,15 @@ def _calculate_optimal_pagination(
     body_content = content[3:-1]  # body paragraphs
     closing = content[-1:]  # closing phrase
 
-    # Try 1 page only if it fits with a GOOD font size (>= 48)
-    for test_font in range(FONT_SIZE_MAX, 46, -2):
+    # Try 1 page - allow fonts down to 30pt for all readings
+    for test_font in range(FONT_SIZE_MAX, FONT_SIZE_MIN - 1, -2):
         total_height = _estimate_text_height(content, test_font, is_first_page=True)
         if total_height <= max_height:
             return 1, test_font, [content]
 
     # Content needs 2 pages - find largest font for 2-page layout
-    # Put more content on first page (60/40 split)
-    split_point = max(1, int(len(body_content) * 0.6))
+    # Even 50/50 split across both pages
+    split_point = math.ceil(len(body_content) / 2)
     page1_body = body_content[:split_point]
     page2_body = body_content[split_point:]
 
@@ -455,59 +554,16 @@ def _calculate_optimal_pagination(
     ]
 
     # Find largest font that fits both pages
+    # Use more generous height for 2-page layout (content split across pages)
+    generous_height = max_height + 60
     for test_font in range(FONT_SIZE_MAX, FONT_SIZE_MIN - 1, -2):
         page1_height = _estimate_text_height(pages[0], test_font, is_first_page=True)
         page2_height = _estimate_text_height(pages[1], test_font, is_first_page=False)
-        if page1_height <= max_height and page2_height <= max_height:
+        if page1_height <= generous_height and page2_height <= generous_height:
             return 2, test_font, pages
 
-    # Fallback to minimum font
-    font_size = FONT_SIZE_MIN
-
-    # Calculate how many pages we need
-    # First page has header overhead, estimate body capacity
-    first_page_body_capacity = (max_height - _estimate_text_height(header_content, font_size, True)) // (int(1.2 * font_size) * 2)
-    middle_page_capacity = max_height // (int(1.2 * font_size) * 2)
-    last_page_overhead = _estimate_text_height(closing, font_size) + font_size * 2
-
-    # Calculate paragraphs per page
-    total_body_paragraphs = len(body_content)
-
-    if total_body_paragraphs <= first_page_body_capacity + middle_page_capacity:
-        # 2 pages enough
-        num_pages = 2
-        split_point = max(1, total_body_paragraphs // 2)
-
-        page1_body = body_content[:split_point]
-        page2_body = body_content[split_point:]
-
-        pages = [
-            header_content + page1_body,
-            page2_body + closing
-        ]
-    elif total_body_paragraphs <= first_page_body_capacity + 2 * middle_page_capacity:
-        # 3 pages
-        num_pages = 3
-        third = max(1, total_body_paragraphs // 3)
-
-        pages = [
-            header_content + body_content[:third],
-            body_content[third:2*third],
-            body_content[2*third:] + closing
-        ]
-    else:
-        # 4 pages
-        num_pages = 4
-        quarter = max(1, total_body_paragraphs // 4)
-
-        pages = [
-            header_content + body_content[:quarter],
-            body_content[quarter:2*quarter],
-            body_content[2*quarter:3*quarter],
-            body_content[3*quarter:] + closing
-        ]
-
-    return num_pages, font_size, pages
+    # Fallback: always 2 pages at minimum font; render loop will reduce further if needed
+    return 2, FONT_SIZE_MIN, pages
 
 
 def _create_two_page_pagination(
@@ -635,6 +691,7 @@ def draw_post(thedate: str, verse_break: int = 0) -> List[str]:
     _truncate_readings(content_dic)
     _clean_gospel_markers(content_dic)
     _remove_pre_gospel_from_reading(content_dic)
+    _remove_liturgical_notes(content_dic)
 
     # Create output directory
     output_path = WEB_DIR / thedate
@@ -832,6 +889,20 @@ def readings_pol(thedate: str) -> List[str]:
         return []
 
 
+def _build_caption(caption: str, thedate: str) -> str:
+    """Build the full Instagram caption from user text and metadata."""
+    hashtags = " ".join(DEFAULT_HASHTAGS)
+    clean_caption = caption.split("\n***\n")[0].rstrip()
+    return f"""{clean_caption}
+***
+Grafika wykonana za pomocą sztucznej inteligencji.
+
+{thedate}
+
+{hashtags}
+"""
+
+
 @eel.expose
 def publish(thedate: str, caption: str) -> bool:
     """
@@ -873,15 +944,7 @@ def publish(thedate: str, caption: str) -> bool:
         return False
 
     # Build caption
-    hashtags = " ".join(DEFAULT_HASHTAGS)
-    full_caption = f"""{caption}
-***
-Grafika wykonana za pomocą sztucznej inteligencji.
-
-{thedate}
-
-{hashtags}
-"""
+    full_caption = _build_caption(caption, thedate)
 
     alt_text = {
         "custom_accessibility_caption": (
@@ -933,6 +996,7 @@ def _get_readings_dict(thedate: str) -> Dict[str, List[str]]:
 
     _truncate_readings(content_dic)
     _clean_gospel_markers(content_dic)
+    _remove_liturgical_notes(content_dic)
 
     return content_dic
 

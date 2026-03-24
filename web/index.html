@@ -222,6 +222,17 @@
       .reading-text p {
         margin: 0 0 10px 0;
       }
+      .reading-text-editable {
+        width: 100%;
+        min-height: 200px;
+        line-height: 1.6;
+        font-size: 14px;
+        font-family: inherit;
+        border: 1px solid #d4c9b5;
+        border-radius: 4px;
+        padding: 10px;
+        resize: vertical;
+      }
       .reading-placeholder {
         color: #999;
         font-style: italic;
@@ -340,8 +351,11 @@
       <h2>Cover Image Generation (Midjourney)</h2>
 
       <div class="controls">
+        <button id="prev-date-btn" class="secondary" title="Previous day">&#9664;</button>
         <input type="date" id="input_date" name="creation_date" />
+        <button id="next-date-btn" class="secondary" title="Next day">&#9654;</button>
         <button id="load-readings-btn">Load Readings</button>
+        <button id="reset-btn" class="secondary">Reset</button>
       </div>
 
       <div class="reading-select">
@@ -383,9 +397,9 @@
       <img id="cover-preview" style="display: none;" />
     </div>
 
-    <!-- Reading Display Section -->
+    <!-- Reading Display Section (editable - used as publication caption) -->
     <div class="reading-display-section">
-      <h2>Reading Preview</h2>
+      <h2>Reading Preview & Caption</h2>
       <div id="reading-tabs" class="reading-tabs">
         <span class="reading-placeholder">Load readings to see available texts</span>
       </div>
@@ -394,7 +408,7 @@
           <span id="reading-type" class="reading-type"></span>
           <span id="reading-reference" class="reading-reference"></span>
         </div>
-        <div id="reading-text" class="reading-text"></div>
+        <textarea id="dynamicTextArea" class="reading-text-editable" rows="12" placeholder="Reading text will appear here. Edit as needed for caption."></textarea>
       </div>
     </div>
 
@@ -404,15 +418,7 @@
       <input type="number" id="verse_break" name="verse" min="0" value="0" placeholder="Verse break" />
       <button class="posts">Create post</button>
       <button class="english_readings">English readings</button>
-      <button class="polish_readings">Polish readings</button>
       <button class="publish">Publish</button>
-    </div>
-
-    <div class="caption-template">
-***
-Grafika wykonana za pomocą sztucznej inteligencji.
-
-#Bible #Biblia #czytanianadzis #słowoboze #dalle3 #midjourney #catholicchurch
     </div>
 
     <div id="images-container"></div>

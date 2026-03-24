@@ -5,6 +5,7 @@ Tests for create_graphic.py module.
 import pytest
 
 from create_graphic import (
+    _build_caption,
     _clean_content_list,
     _normalize_readings,
     _parse_readings,
@@ -237,3 +238,29 @@ class TestCreateFourPagePagination:
         assert "TEST cz.2" in result
         assert "TEST cz.3" in result
         assert "TEST cz.6" in result
+
+
+class TestBuildCaption:
+    """Tests for _build_caption — verifies the *** footer block appears exactly once."""
+
+    def test_single_asterisks_block_with_plain_caption(self):
+        result = _build_caption("Czytanie z dnia.", "2026-03-24")
+        assert result.count("***") == 1
+
+    def test_single_asterisks_block_when_caption_already_contains_footer(self):
+        # Regression: the old JS textarea appended the footer too, causing duplication
+        caption_with_footer = "Czytanie z dnia.\n***\nGrafika wykonana za pomocą sztucznej inteligencji."
+        result = _build_caption(caption_with_footer, "2026-03-24")
+        assert result.count("***") == 1
+
+    def test_ai_credit_appears_exactly_once(self):
+        result = _build_caption("Czytanie z dnia.", "2026-03-24")
+        assert result.count("Grafika wykonana za pomocą sztucznej inteligencji.") == 1
+
+    def test_date_included_in_caption(self):
+        result = _build_caption("Czytanie z dnia.", "2026-03-24")
+        assert "2026-03-24" in result
+
+    def test_caption_text_preserved(self):
+        result = _build_caption("Pierwsze czytanie.", "2026-03-24")
+        assert result.startswith("Pierwsze czytanie.")

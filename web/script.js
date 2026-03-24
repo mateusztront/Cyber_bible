@@ -7,6 +7,47 @@ let selectedReadingName = '';
 let selectedReadingText = '';
 
 // =============================================================================
+// AUDIO NOTIFICATIONS
+// =============================================================================
+
+function playNotificationSound(type = 'complete') {
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const oscillator = audioCtx.createOscillator();
+    const gainNode = audioCtx.createGain();
+
+    oscillator.connect(gainNode);
+    gainNode.connect(audioCtx.destination);
+
+    if (type === 'complete') {
+        // Success sound: two ascending tones
+        oscillator.frequency.setValueAtTime(523, audioCtx.currentTime); // C5
+        oscillator.frequency.setValueAtTime(659, audioCtx.currentTime + 0.15); // E5
+        gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+        oscillator.start(audioCtx.currentTime);
+        oscillator.stop(audioCtx.currentTime + 0.3);
+    } else if (type === 'error') {
+        // Error sound: low tone
+        oscillator.frequency.setValueAtTime(200, audioCtx.currentTime);
+        gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+        oscillator.start(audioCtx.currentTime);
+        oscillator.stop(audioCtx.currentTime + 0.4);
+    } else if (type === 'attention') {
+        // Attention sound: three short beeps
+        oscillator.frequency.setValueAtTime(880, audioCtx.currentTime); // A5
+        gainNode.gain.setValueAtTime(0.2, audioCtx.currentTime);
+        gainNode.gain.setValueAtTime(0, audioCtx.currentTime + 0.1);
+        gainNode.gain.setValueAtTime(0.2, audioCtx.currentTime + 0.15);
+        gainNode.gain.setValueAtTime(0, audioCtx.currentTime + 0.25);
+        gainNode.gain.setValueAtTime(0.2, audioCtx.currentTime + 0.3);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+        oscillator.start(audioCtx.currentTime);
+        oscillator.stop(audioCtx.currentTime + 0.5);
+    }
+}
+
+// =============================================================================
 // 2FA POPUP FUNCTIONS
 // =============================================================================
 
@@ -118,9 +159,20 @@ setInterval(poll2FANeeded, 500);
 // COVER GENERATION FUNCTIONS
 // =============================================================================
 
-function showStatus(message, type = 'info') {
+function showStatus(message, type = 'info', playSound = true) {
     const statusDiv = document.getElementById('cover-status');
     statusDiv.innerHTML = `<div class="status-message ${type}">${message}</div>`;
+
+    // Play notification sound
+    if (playSound) {
+        if (type === 'success') {
+            playNotificationSound('complete');
+        } else if (type === 'error') {
+            playNotificationSound('error');
+        } else if (type === 'warning') {
+            playNotificationSound('attention');
+        }
+    }
 }
 
 function showLoading(message) {
@@ -167,7 +219,9 @@ async function displayReading(readingName) {
     // Show content area
     document.getElementById('reading-content-area').style.display = 'block';
     document.getElementById('reading-type').textContent = readingName;
-    document.getElementById('reading-text').innerHTML = '<span class="reading-placeholder">Loading...</span>';
+
+    const textarea = document.getElementById('dynamicTextArea');
+    textarea.value = 'Loading...';
 
     try {
         const fullText = await eel.get_full_reading_text(thedate, readingName)();
@@ -184,14 +238,12 @@ async function displayReading(readingName) {
 
         document.getElementById('reading-reference').textContent = reference;
 
-        // Format text with paragraphs
-        const paragraphs = textContent.split('\n').filter(p => p.trim());
-        const formattedText = paragraphs.map(p => `<p>${p}</p>`).join('');
-        document.getElementById('reading-text').innerHTML = formattedText || '<span class="reading-placeholder">No content</span>';
+        // Put text in editable textarea (this will be used as publication caption)
+        textarea.value = textContent.trim();
 
     } catch (error) {
         console.error('Error loading reading:', error);
-        document.getElementById('reading-text').innerHTML = '<span class="reading-placeholder">Error loading reading</span>';
+        textarea.value = 'Error loading reading';
     }
 }
 
@@ -243,6 +295,69 @@ document.getElementById('load-readings-btn').onclick = async function() {
         showStatus('Error loading readings. Check console for details.', 'error');
     }
 };
+
+// Reset all state for a new date
+function resetForNewDate() {
+    // Clear state variables
+    currentReadings = {};
+    selectedReadingName = '';
+    selectedReadingText = '';
+    currentGridData = null;
+    isAdding = true;
+
+    // Remove generated images
+    imageElements.forEach(element => element.remove());
+    imageElements.length = 0;
+
+    // Clear reading select dropdown
+    const select = document.getElementById('reading-select');
+    select.innerHTML = '<option value="">-- Load readings first --</option>';
+    select.disabled = true;
+
+    // Clear reading tabs
+    const tabContainer = document.querySelector('.reading-tabs');
+    if (tabContainer) tabContainer.innerHTML = '';
+
+    // Clear textarea
+    document.getElementById('dynamicTextArea').value = '';
+
+    // Clear and hide cover preview
+    const coverPreview = document.getElementById('cover-preview');
+    coverPreview.src = '';
+    coverPreview.style.display = 'none';
+
+    // Hide grid preview
+    document.getElementById('grid-preview-container').style.display = 'none';
+    document.getElementById('grid-image').src = '';
+
+    // Clear prompt textarea
+    document.getElementById('midjourney-prompt').value = '';
+
+    // Reset verse break to 0
+    document.getElementById('verse_break').value = '0';
+
+    // Disable buttons until readings loaded
+    document.getElementById('generate-prompt-btn').disabled = true;
+    document.getElementById('generate-variations-btn').disabled = true;
+    document.getElementById('generate-cover-btn').disabled = true;
+
+    // Hide prompt variations container
+    const variationsContainer = document.getElementById('prompt-variations-container');
+    if (variationsContainer) variationsContainer.style.display = 'none';
+
+    showStatus('Reset complete. Select a new date and load readings.', 'info');
+}
+
+document.getElementById('reset-btn').onclick = resetForNewDate;
+
+function shiftDate(days) {
+    const input = document.getElementById('input_date');
+    const current = input.value ? new Date(input.value) : new Date();
+    current.setDate(current.getDate() + days);
+    input.value = current.toISOString().slice(0, 10);
+}
+document.getElementById('prev-date-btn').onclick = () => shiftDate(-1);
+document.getElementById('next-date-btn').onclick = () => shiftDate(1);
 
 // Handle reading selection - load English text into prompt
 document.getElementById('reading-select').onchange = async function() {
@@ -469,6 +584,7 @@ document.querySelector(".posts").onclick = async function() {
                 container.appendChild(imageElement);
                 imageElements.push(imageElement);
             }
+            playNotificationSound('complete');
         } else {
             // Remove all previously added elements
             imageElements.forEach(element => element.remove());
@@ -477,6 +593,7 @@ document.querySelector(".posts").onclick = async function() {
         isAdding = !isAdding;
     } catch (error) {
         console.error('Error creating post:', error);
+        playNotificationSound('error');
         alert('Error creating post. Check console for details.');
     }
 }
@@ -502,33 +619,6 @@ document.querySelector(".english_readings").onclick = async function() {
     }
 }
 
-// Polish readings button
-document.querySelector(".polish_readings").onclick = async function() {
-    const thedate = document.getElementById('input_date').value;
-
-    try {
-        const content_list_text = await eel.readings_pol(thedate)();
-
-        const container = document.getElementById('content-container');
-        const newDiv = document.createElement('div');
-
-        const newTextArea = document.createElement('textarea');
-        newTextArea.setAttribute("rows", "20");
-        newTextArea.setAttribute("cols", "100");
-        newTextArea.setAttribute("id", "dynamicTextArea");
-        newTextArea.setAttribute("autocomplete", "off");
-
-        for (let i = 0; i < content_list_text.length; i++) {
-            const txt = document.createTextNode(content_list_text[i] + ' ');
-            newTextArea.appendChild(txt);
-        }
-
-        newDiv.appendChild(newTextArea);
-        container.appendChild(newDiv);
-    } catch (error) {
-        console.error('Error fetching Polish readings:', error);
-    }
-}
 
 // Publish button
 document.querySelector(".publish").onclick = async function() {
@@ -546,6 +636,13 @@ document.querySelector(".publish").onclick = async function() {
         );
         newDiv.appendChild(newContent);
         container.appendChild(newDiv);
+
+        // Play notification sound
+        if (publish_answer) {
+            playNotificationSound('complete');
+        } else {
+            playNotificationSound('error');
+        }
     } catch (error) {
         console.error('Error publishing:', error);
         alert('Error publishing. Check console for details.');
