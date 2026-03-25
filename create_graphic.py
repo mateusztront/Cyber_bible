@@ -923,19 +923,27 @@ def publish(thedate: str, caption: str) -> bool:
 
     working_path = WEB_DIR / thedate
 
-    # Ensure all files have .jpg extension (fixed logic bug from original)
-    for filename in os.listdir(working_path):
-        if not filename.endswith((".jpg", ".webp", ".png")):
-            old_path = working_path / filename
-            new_path = working_path / (filename.split(".")[0] + ".jpg")
-            os.rename(old_path, new_path)
+    # Order files: cover first (any non-reading image), then readings in order
+    reading_prefixes = ["PIERWSZE", "PSALM", "DRUGIE", "EWANGELIA"]
+    all_images = sorted(f for f in os.listdir(working_path) if f.endswith((".jpg", ".webp", ".png", ".jpeg")))
 
-    # Order files: Midjourney first, then readings in order
-    general_order = ["mateusz", "PIERWSZE", "PSALM", "DRUGIE", "EWANGELIA"]
-    ordered_files = []
+    # Convert cover images to 1080x1080 JPEG (Instagram requires consistent dimensions)
+    cover_files = []
+    for filename in all_images:
+        if not any(p in filename for p in reading_prefixes):
+            src = working_path / filename
+            dst = working_path / "cover.jpg"
+            img = Image.open(src).convert("RGB")
+            img = img.resize((IMAGE_SIZE, IMAGE_SIZE), Image.LANCZOS)
+            img.save(dst, "JPEG", quality=95)
+            if src != dst:
+                src.unlink()
+            cover_files.append(dst)
 
-    for prefix in general_order:
-        for filename in os.listdir(working_path):
+    ordered_files = list(cover_files)
+
+    for prefix in reading_prefixes:
+        for filename in all_images:
             if prefix in filename:
                 ordered_files.append(working_path / filename)
 
