@@ -37,23 +37,12 @@ def main():
     logger.info("Starting Cyber Bible application")
     logger.info(f"Web directory: {WEB_DIR}")
 
-    try:
-        # Start the application
-        eel.start(
-            "index.html",
-            size=(800, 800),
-            mode="chrome",
-            port=8000,
-        )
-    except EnvironmentError:
-        # If Chrome not found, try default browser
-        logger.warning("Chrome not found, trying default browser")
-        eel.start(
-            "index.html",
-            size=(800, 800),
-            mode="default",
-            port=8000,
-        )
+    eel.start(
+        "index.html",
+        size=(800, 800),
+        mode="default",
+        port=8000,
+    )
 
 
 if __name__ == "__main__":
