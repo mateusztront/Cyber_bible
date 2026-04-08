@@ -533,18 +533,96 @@ class TestPassionDetection:
 
     def test_long_gospel_detected_as_passion(self, passion_content_dict):
         from config import PASSION_SPLIT_THRESHOLD
-        gospel_len = len(passion_content_dict["EWANGELIA"])
-        assert gospel_len > PASSION_SPLIT_THRESHOLD * 3, \
+        # Body paragraphs only (exclude 3 header items + 1 closing)
+        gospel_body = len(passion_content_dict["EWANGELIA"]) - 4
+        assert gospel_body > PASSION_SPLIT_THRESHOLD * 3, \
             "Fixture gospel should be long enough to trigger passion detection"
 
     def test_short_gospel_not_detected_as_passion(self):
         from config import PASSION_SPLIT_THRESHOLD
         short_gospel = ["J 20, 1-9", "Słowa Ewangelii", "Intro.", "Treść.", "Oto słowo Pańskie."]
-        assert len(short_gospel) <= PASSION_SPLIT_THRESHOLD * 3
+        # Body paragraphs only (exclude 3 header items + 1 closing)
+        body_count = max(len(short_gospel) - 4, 0)
+        assert body_count <= PASSION_SPLIT_THRESHOLD * 3
+
+    def test_medium_gospel_not_detected_as_passion(self):
+        """A gospel with ~9 body paragraphs (like J 20, 11-18) should not be passion."""
+        from config import PASSION_SPLIT_THRESHOLD
+        medium_gospel = (
+            ["J 20, 11-18", "Subtitle", "Intro bold"]
+            + [f"Paragraph {i}." for i in range(9)]
+            + ["Oto słowo Pańskie."]
+        )
+        body_count = max(len(medium_gospel) - 4, 0)
+        assert body_count <= PASSION_SPLIT_THRESHOLD * 3
+
+    def test_passion_header_normalization_accusative(self):
+        """Accusative form 'Mękę...' is converted to nominative and moved to bold-intro slot."""
+        from create_graphic import _normalize_passion_gospel_header
+        content_dic = {
+            "EWANGELIA": [
+                "Mt 26, 14-27, 66",
+                "Mękę naszego Pana Jezusa Chrystusa według świętego Mateusza",
+                "Jezus rzekł do uczniów:",
+                "Oto słowo Pańskie.",
+            ]
+        }
+        _normalize_passion_gospel_header(content_dic)
+        gospel = content_dic["EWANGELIA"]
+        assert gospel[1] == "", "subtitle slot should be cleared"
+        assert gospel[2] == "Męka naszego Pana Jezusa Chrystusa według świętego Mateusza"
+        assert gospel[3] == "Jezus rzekł do uczniów:"
+
+    def test_passion_rubric_lines_removed_by_clean(self):
+        """Passion Gospel rubric/legend lines are removed during initial cleaning."""
+        from create_graphic import _clean_content_list
+        content = [
+            "EWANGELIA",
+            "J 18, 1 - 19, 42",
+            "Mękę naszego Pana Jezusa Chrystusa według świętego Jana",
+            "+ — słowa Chrystusa",
+            "E — słowa Ewangelisty",
+            "I — słowa innych osób pojedynczych",
+            "T — słowa kilku osób lub tłumu",
+            "Pojmanie Jezusa",
+            "E. Po wieczerzy Jezus wyszedł z uczniami swymi za potok Cedron. Także i Judasz, który Go wydał.",
+            "Przed Piłatem",
+            "Od Kajfasza zaprowadzili Jezusa do pretorium.",
+            "Oto słowo Pańskie.",
+        ]
+        result = _clean_content_list(content)
+        # Rubric lines removed
+        for item in result:
+            assert "słowa Chrystusa" not in item
+            assert "słowa Ewangelisty" not in item
+        # Section headers removed
+        assert "Pojmanie Jezusa" not in result
+        assert "Przed Piłatem" not in result
+        # Scripture paragraphs preserved (even those mentioning Judasz)
+        assert any("Po wieczerzy" in item for item in result)
+        assert any("Judasz" in item for item in result)
+        assert any("Kajfasza" in item for item in result)
+
+    def test_passion_header_normalization_nominative(self):
+        """Nominative form 'Męka...' is moved to bold-intro slot without conversion."""
+        from create_graphic import _normalize_passion_gospel_header
+        content_dic = {
+            "EWANGELIA": [
+                "Łk 22, 14-23, 56",
+                "Męka naszego Pana Jezusa Chrystusa według świętego Łukasza",
+                "Jezusa postanowiono na śmierć.",
+                "Oto słowo Pańskie.",
+            ]
+        }
+        _normalize_passion_gospel_header(content_dic)
+        gospel = content_dic["EWANGELIA"]
+        assert gospel[1] == "", "subtitle slot should be cleared"
+        assert gospel[2] == "Męka naszego Pana Jezusa Chrystusa według świętego Łukasza"
+        assert gospel[3] == "Jezusa postanowiono na śmierć."
 
 
 # ---------------------------------------------------------------------------
-# publish() — passion split into 2 carousels
+# publish() — passion day publishes as single carousel (Instagram limit = 20)
 # ---------------------------------------------------------------------------
 
 class TestPublishPassionSplit:
@@ -566,25 +644,19 @@ class TestPublishPassionSplit:
         for f in files:
             (post_dir / f).write_bytes(b"fake")
 
-        # Create passion marker
-        (post_dir / ".passion").touch()
         return post_dir
 
     @patch("create_graphic.WEB_DIR")
     @patch("create_graphic.login_user")
-    def test_publishes_two_carousels_on_passion_day(self, mock_login, mock_web_dir, tmp_path):
+    def test_publishes_single_carousel_on_passion_day(self, mock_login, mock_web_dir, tmp_path):
         from create_graphic import publish
         from PIL import Image
 
         thedate = "2026-03-29"
         post_dir = self._make_reading_files(tmp_path, thedate)
 
-        # Make fake cover a real image so PIL can open it
         img = Image.new("RGB", (100, 100), "white")
         img.save(post_dir / "cover.jpg")
-
-        mock_web_dir.__truediv__ = lambda self, other: tmp_path / other
-        mock_web_dir.__rtruediv__ = lambda self, other: tmp_path / other
 
         mock_client = MagicMock()
         mock_client.album_upload.return_value = MagicMock(pk="123")
@@ -593,11 +665,11 @@ class TestPublishPassionSplit:
         with patch("create_graphic.WEB_DIR", tmp_path):
             result = publish(thedate, "Test caption")
 
-        assert mock_client.album_upload.call_count == 2
+        assert mock_client.album_upload.call_count == 1
 
     @patch("create_graphic.WEB_DIR")
     @patch("create_graphic.login_user")
-    def test_passion_captions_have_part_numbers(self, mock_login, mock_web_dir, tmp_path):
+    def test_passion_carousel_contains_all_files(self, mock_login, mock_web_dir, tmp_path):
         from create_graphic import publish
         from PIL import Image
 
@@ -614,13 +686,15 @@ class TestPublishPassionSplit:
         with patch("create_graphic.WEB_DIR", tmp_path):
             publish(thedate, "Test caption")
 
-        captions = [c[1]["caption"] for c in mock_client.album_upload.call_args_list]
-        assert any("1/2" in cap for cap in captions)
-        assert any("2/2" in cap for cap in captions)
+        paths = mock_client.album_upload.call_args[1]["paths"]
+        # All reading files should be in one carousel
+        path_names = [p.split("\\")[-1].split("/")[-1] for p in paths]
+        assert any("EWANGELIA" in n for n in path_names)
+        assert any("PIERWSZE" in n for n in path_names)
 
     @patch("create_graphic.WEB_DIR")
     @patch("create_graphic.login_user")
-    def test_part2_contains_only_ewangelia_files(self, mock_login, mock_web_dir, tmp_path):
+    def test_passion_caption_has_no_part_numbers(self, mock_login, mock_web_dir, tmp_path):
         from create_graphic import publish
         from PIL import Image
 
@@ -637,6 +711,6 @@ class TestPublishPassionSplit:
         with patch("create_graphic.WEB_DIR", tmp_path):
             publish(thedate, "Test caption")
 
-        # Second call = part 2 = Passion Gospel only
-        part2_paths = mock_client.album_upload.call_args_list[1][1]["paths"]
-        assert all("EWANGELIA" in p for p in part2_paths)
+        caption = mock_client.album_upload.call_args[1]["caption"]
+        assert "1/2" not in caption
+        assert "2/2" not in caption

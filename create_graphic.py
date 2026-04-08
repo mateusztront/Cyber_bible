@@ -91,6 +91,117 @@ def _create_background() -> Image.Image:
     return background
 
 
+def _get_liturgical_year(date_str: str) -> str:
+    """Determine liturgical year (A, B, or C) from date string."""
+    year = int(date_str[:4])
+    return {0: "A", 1: "B", 2: "C"}[year % 3]
+
+
+def _scrape_content_list(thedate: str) -> List[str]:
+    """Fetch raw content list for a given date, handling paginated vigil pages."""
+    url = f"{LITURGY_URL_PL}/{thedate}"
+    response = requests.get(url, timeout=30)
+    response.raise_for_status()
+
+    soup = BeautifulSoup(response.content, "html.parser")
+    content_areas = soup.find_all("div", "txt__rich-area")
+
+    if len(content_areas) < 2:
+        raise ValueError("Could not find reading content on page")
+
+    # Check for vigil pagination (content_index div with sub-page links)
+    idx_div = soup.find("div", "content_index")
+    if idx_div:
+        links = idx_div.find_all("a", href=True)
+        page_nums = set()
+        for a in links:
+            # Skip old lectionary link
+            if "STAREGO" in a.get_text().upper():
+                continue
+            match = re.search(r"/(\d+)#", a["href"])
+            if match:
+                page_nums.add(int(match.group(1)))
+
+        if len(page_nums) > 1:
+            logger.info(f"Vigil pagination detected: {len(page_nums)} sub-pages")
+            combined: List[str] = []
+            for page_num in sorted(page_nums):
+                page_url = f"{LITURGY_URL_PL}/{thedate}/{page_num}"
+                page_resp = requests.get(page_url, timeout=30)
+                page_resp.raise_for_status()
+                page_soup = BeautifulSoup(page_resp.content, "html.parser")
+                page_areas = page_soup.find_all("div", "txt__rich-area")
+                if len(page_areas) >= 2:
+                    area = page_areas[1]
+                    # Remove content_index TOC to avoid duplicate markers
+                    for ci in area.find_all("div", "content_index"):
+                        ci.decompose()
+                    combined.extend(area.get_text().split("\n"))
+            return combined
+
+    return content_areas[1].get_text().split("\n")
+
+
+def _normalize_vigil_markers(content_list: List[str], thedate: str) -> List[str]:
+    """Normalize vigil-specific markers and content before standard processing."""
+    result = content_list.copy()
+    liturgical_year = _get_liturgical_year(thedate)
+
+    # Remove noise lines (embedded video/social references)
+    result = [
+        line for line in result
+        if line.strip() != "Maskacjusz TV"
+        and not line.strip().startswith("#")
+        and line.strip() != "Nie mówi się: Oto słowo Boże."
+    ]
+
+    # Uppercase variant suffixes so _normalize_readings can handle them
+    variant_replacements = [
+        ("PIERWSZE CZYTANIE dłuższe", "PIERWSZE CZYTANIE DŁUŻSZE"),
+        ("PIERWSZE CZYTANIE krótsze", "PIERWSZE CZYTANIE KRÓTSZE"),
+        ("DRUGIE CZYTANIE dłuższe", "DRUGIE CZYTANIE DŁUŻSZE"),
+        ("DRUGIE CZYTANIE krótsze", "DRUGIE CZYTANIE KRÓTSZE"),
+    ]
+    for old, new in variant_replacements:
+        for i, text in enumerate(result):
+            if text.strip() == old:
+                result[i] = new
+
+    # Normalize epistle marker
+    for i, text in enumerate(result):
+        if "ÓSME CZYTANIE" in text and "EPISTOŁA" in text.upper():
+            result[i] = "ÓSME CZYTANIE"
+
+    # Select correct Gospel year, remove other years
+    target_marker = f"EWANGELIA W ROKU {liturgical_year}"
+    other_markers = [f"EWANGELIA W ROKU {y}" for y in "ABC" if y != liturgical_year]
+
+    # Find and rename target Gospel
+    for i, text in enumerate(result):
+        if text.strip() == target_marker:
+            result[i] = "EWANGELIA"
+            break
+
+    # Remove content for other Gospel years
+    for other in other_markers:
+        try:
+            start = result.index(other)
+            # Find "Oto słowo Pańskie." ending this section
+            end = start + 1
+            for j in range(start + 1, len(result)):
+                if result[j].strip() == "Oto słowo Pańskie.":
+                    end = j + 1
+                    break
+                if result[j].strip() in [target_marker, "EWANGELIA"] + other_markers:
+                    end = j
+                    break
+            del result[start:end]
+        except ValueError:
+            pass
+
+    return result
+
+
 def _clean_content_list(content_list: List[str]) -> List[str]:
     """Clean and normalize the scraped content list."""
     # Remove empty trailing elements
@@ -103,12 +214,48 @@ def _clean_content_list(content_list: List[str]) -> List[str]:
         if "Liturgia Słowa" in text or text == "":
             continue
 
-        # Skip passion-specific content
+        # Skip passion-specific content (section headers / rubrics, not scripture)
+        # Substring matches — phrases specific enough to never appear in scripture
         skip_phrases = [
             "Jezus przed Piłatem",
             "Droga krzyżowa",
             "Wszyscy klękają i przez chwilę zachowują milczenie.",
+            # Palm Sunday (Mt 26/27) section headers
+            "Jezus odrzucony przez swój naród",
+            "Król wyszydzony",
+            "Wyszydzenie na krzyżu",
+            "Śmierć Jezusa",
+            "Ukrzyżowanie Jezusa",
+            "Pojmanie Jezusa",
+            "Jezus przed Sanhedrynem",
+            "Zaparcie się Piotra",
+            "Jezus przed Annaszem",
+            "Jezus wydany na śmierć",
+            "Przebicie boku Jezusa",
+            # Passion Gospel rubric / legend lines (speaker marker explanations)
+            "słowa Chrystusa",
+            "słowa Ewangelisty",
+            "słowa innych osób pojedynczych",
+            "słowa kilku osób lub tłumu",
         ]
+        # Exact-match headers — short names that could appear in scripture text
+        skip_headers_exact = {
+            "Judasz",
+            "Ukrzyżowanie",
+            "Złożenie do grobu",
+            # Good Friday (J 18/19) section headers
+            "Przed Piłatem",
+            "Przesłuchanie",
+            "\u201eOto człowiek\u201d",
+            "Wyrok",
+            "Testament dany z krzyża",
+            "Przebicie serca",
+            "Złożenie Jezusa do grobu",
+            "Droga krzyżowa i ukrzyżowanie",
+            "Przed Annaszem. Zaparcie się Piotra",
+        }
+        if text.strip() in skip_headers_exact:
+            continue
         if any(phrase in text for phrase in skip_phrases):
             continue
 
@@ -216,9 +363,20 @@ def _normalize_readings(content_list: List[str]) -> List[str]:
     except ValueError:
         pass
 
+    # Handle longer/shorter Second Reading versions (Easter Vigil) - prefer shorter
+    try:
+        if "DRUGIE CZYTANIE DŁUŻSZE" in result and "DRUGIE CZYTANIE KRÓTSZE" in result:
+            longer_idx = result.index("DRUGIE CZYTANIE DŁUŻSZE")
+            longer_end = result.index("Oto słowo Boże.", longer_idx) + 1
+            del result[longer_idx:longer_end]
+            logger.debug(f"Removed longer Second Reading (lines {longer_idx}-{longer_end})")
+    except ValueError:
+        pass
+
     # Replacements for shorter versions
     replacements = [
         ("PIERWSZE CZYTANIE KRÓTSZE", "PIERWSZE CZYTANIE"),
+        ("DRUGIE CZYTANIE KRÓTSZE", "DRUGIE CZYTANIE"),
         ("EWANGELIA KRÓTSZA", "EWANGELIA"),
         (".PSALM RESPONSORYJNY", "PSALM RESPONSORYJNY"),
         ("PSALM RESPONSORYJNY ", "PSALM RESPONSORYJNY"),
@@ -413,6 +571,72 @@ def _add_psalm_refrains(content_dic: Dict[str, List[str]]) -> None:
                     psalm.insert(pos, "Refren")
 
 
+def _normalize_passion_gospel_header(content_dic: Dict[str, List[str]]) -> None:
+    """
+    For Passion Gospels the scraped subtitle contains 'naszego Pana' (unique to the
+    Passion title).  Normalise to nominative 'Męka' (converting accusative 'Mękę' if
+    needed), move the title to the bold-intro slot (index 2), and clear the subtitle
+    slot (index 1).  Safe no-op for all non-Passion readings.
+    """
+    gospel = content_dic.get("EWANGELIA", [])
+    if len(gospel) < 2:
+        return
+    subtitle = gospel[1]
+    if "naszego Pana" in subtitle:
+        passion_title = subtitle.replace("Mękę", "Męka", 1)
+        content_dic["EWANGELIA"] = [gospel[0], ""] + [passion_title] + gospel[2:]
+
+
+def _ensure_gospel_subtitle_slot(content_dic: Dict[str, List[str]]) -> None:
+    """
+    Some Gospel readings lack a thematic subtitle — the formula
+    'Słowa Ewangelii...' sits directly at index 1 instead of index 2.
+    Insert an empty subtitle so the structure is always:
+      [0] reference, [1] subtitle (may be empty), [2] bold intro formula, ...
+    """
+    gospel = content_dic.get("EWANGELIA", [])
+    if len(gospel) < 2:
+        return
+    if gospel[1].startswith("Słowa Ewangelii"):
+        content_dic["EWANGELIA"] = [gospel[0], ""] + gospel[1:]
+
+
+def _split_long_gospel_paragraphs(content_dic: Dict[str, List[str]], max_chars: int = 350) -> None:
+    """
+    Split Gospel body paragraphs longer than max_chars at sentence boundaries.
+    This lets the pagination algorithm use a larger font by keeping each chunk short.
+    """
+    if "EWANGELIA" not in content_dic:
+        return
+    gospel = content_dic["EWANGELIA"]
+    if len(gospel) < 4:
+        return
+
+    # Sentence boundary: period/exclamation/question followed by space + uppercase or quote
+    sentence_end = re.compile(r'(?<=[.!?])\s+(?=[A-ZŁŚŻŹĆĄĘÓŃ«"\u201c\u201e])')
+
+    new_body: List[str] = []
+    for para in gospel[3:-1]:
+        if len(para) <= max_chars:
+            new_body.append(para)
+            continue
+        # Split at sentence boundaries, keeping chunks under max_chars
+        sentences = sentence_end.split(para)
+        chunk = ""
+        for sent in sentences:
+            candidate = (chunk + " " + sent).strip() if chunk else sent
+            if len(candidate) <= max_chars:
+                chunk = candidate
+            else:
+                if chunk:
+                    new_body.append(chunk)
+                chunk = sent
+        if chunk:
+            new_body.append(chunk)
+
+    content_dic["EWANGELIA"] = gospel[:3] + new_body + gospel[-1:]
+
+
 def _normalize_sekwencja_content(content_dic: Dict[str, List[str]]) -> None:
     """Wrap SEKWENCJA content into standard reading structure for draw_text()."""
     if "SEKWENCJA" not in content_dic:
@@ -508,6 +732,7 @@ def _generate_reading_images(
     background: Image.Image,
     output_path: Path,
     verse_break: int,
+    passion_mode: bool = False,
 ) -> List[str]:
     """Generate images for all readings with smart auto-pagination."""
     posts_list = []
@@ -519,9 +744,18 @@ def _generate_reading_images(
         reading_content = content_dic[reading_name]
         font_size = FONT_SIZE_DEFAULT
 
+        # Passion Gospels get extended page limit; regular Gospels use standard limit
+        if passion_mode and reading_name == "EWANGELIA":
+            pages_limit = MAX_PAGES_GOSPEL
+        else:
+            pages_limit = MAX_PAGES_PER_READING
+
         # Calculate optimal pagination
+        # Passion mode: prefer larger font (more readable) over fewer pages
+        prefer_readability = passion_mode and reading_name == "EWANGELIA"
         num_pages, optimal_font, pages = _calculate_optimal_pagination(
-            reading_content, font_size, reading_name=reading_name
+            reading_content, font_size, reading_name=reading_name, max_pages=pages_limit,
+            prefer_readability=prefer_readability,
         )
 
         logger.info(f"{reading_name}: {num_pages} page(s), font size {optimal_font}")
@@ -617,16 +851,31 @@ def _estimate_text_height(content: List[str], font_size: int, is_first_page: boo
     import textwrap
 
     line_height = int(1.2 * font_size)
-    # Conservative width estimate to avoid overflow
-    width = int(70 - 0.35 * (25 / 12 * font_size))
+    # Based on _calculate_layout() in draw_posts.py, minus safety margin
+    # for proportional font width variation (wide Polish chars like W, Ś, ą)
+    size_x_left = int(25 / 12 * font_size)
+    width = int(75 - 0.325 * size_x_left) - 3
 
     total_lines = 0
 
-    # Header takes ~3 lines on first page
     if is_first_page:
-        total_lines += 3
+        # Title row: reading_name + reference on one line
+        total_lines += 1
+        # Subtitle: skip if empty (Passion Gospel)
+        subtitle = content[1] if len(content) > 1 else ""
+        if subtitle:
+            total_lines += 1
+        # Bold intro: count actual wrapped lines
+        intro = content[2] if len(content) > 2 else ""
+        if intro:
+            total_lines += max(len(textwrap.wrap(intro, width=width)), 1)
+        # Gap between header and body
+        total_lines += 1
+        body_start = 3
+    else:
+        body_start = 0
 
-    for paragraph in content:
+    for paragraph in content[body_start:]:
         wrapped = textwrap.wrap(paragraph, width=width)
         total_lines += max(len(wrapped), 1)
 
@@ -634,6 +883,7 @@ def _estimate_text_height(content: List[str], font_size: int, is_first_page: boo
 
 
 MAX_PAGES_PER_READING = 4
+MAX_PAGES_GOSPEL = 14  # Passion Gospels spread across more pages for readability
 
 
 def _build_pages(header_content, body_content, closing, split_indices):
@@ -653,17 +903,20 @@ def _calculate_optimal_pagination(
     content: List[str],
     font_size: int,
     max_height: int = IMAGE_SIZE - 40,
-    reading_name: str = ""
+    reading_name: str = "",
+    max_pages: int = MAX_PAGES_PER_READING,
+    prefer_readability: bool = False,
 ) -> Tuple[int, int, List[List[str]]]:
     """
-    Find the split (num_pages + positions) that maximises the smallest fitting font.
+    Find the split (num_pages + font) that maximises font size.
 
-    - Tries 1 page first; if it fits, returns immediately.
-    - For 2..MAX_PAGES_PER_READING pages, enumerates every possible split of
-      body paragraphs and picks the combination with the largest font where
-      every page fits within max_height.
-    - Stops early once font >= FONT_SIZE_DEFAULT (good enough quality).
-    - No hardcoded split ratios.
+    Uses greedy packing: for each font size (large→small), greedily fill pages
+    until all content fits within max_pages.  O(fonts × paragraphs) — no
+    combinatorial explosion.
+
+    When prefer_readability is True (Passion Gospels), the algorithm picks the
+    largest font that fits within the page limit — accepting more pages for
+    better readability.  Otherwise it minimises pages first.
 
     Returns:
         Tuple of (num_pages, optimal_font_size, list of content per page)
@@ -678,45 +931,85 @@ def _calculate_optimal_pagination(
         if _estimate_text_height(content, test_font, is_first_page=True) <= max_height:
             return 1, test_font, [content]
 
-    # --- 2..MAX pages: find split that maximises font size ---
+    # --- multi-page: greedy packing, prefer fewest pages then largest font ---
+    import textwrap
+
+    best_num = max_pages + 1
     best_font = FONT_SIZE_MIN - 1
     best_pages = None
-    best_num_pages = MAX_PAGES_PER_READING
 
-    for num_pages in range(2, MAX_PAGES_PER_READING + 1):
-        if num_pages > n + 1:
-            break  # can't split fewer paragraphs than pages
+    for test_font in range(FONT_SIZE_MAX, FONT_SIZE_MIN - 1, -2):
+        line_height = int(1.2 * test_font)
+        size_x_left = int(25 / 12 * test_font)
+        width = int(75 - 0.325 * size_x_left) - 3
+        para_lines = [max(len(textwrap.wrap(p, width=width)), 1) for p in body_content]
 
-        # Enumerate all ways to place (num_pages-1) split points in body
-        for split_indices in itertools.combinations(range(1, n + 1), num_pages - 1):
-            pages = _build_pages(header_content, body_content, closing, split_indices)
+        # Header height for first page
+        header_lines = 1
+        if len(content) > 1 and content[1]:
+            header_lines += 1
+        if len(content) > 2 and content[2]:
+            header_lines += max(len(textwrap.wrap(content[2], width=width)), 1)
+        header_lines += 1  # gap
+        margin = test_font * 2
+        max_lines = (max_height - margin) // line_height
 
-            for test_font in range(FONT_SIZE_MAX, FONT_SIZE_MIN - 1, -2):
-                fits = all(
-                    _estimate_text_height(p, test_font, is_first_page=(i == 0)) <= max_height
-                    for i, p in enumerate(pages)
-                )
-                if fits:
-                    if test_font > best_font or (test_font == best_font and num_pages < best_num_pages):
-                        best_font = test_font
-                        best_pages = pages
-                        best_num_pages = num_pages
-                    break
+        # Greedy packing
+        pages: List[List[str]] = []
+        current_page: List[str] = list(header_content)
+        current_lines = header_lines
 
-        # Stop if we already reached default font quality
-        if best_font >= FONT_SIZE_DEFAULT:
-            break
+        for i, para in enumerate(body_content):
+            lines_needed = para_lines[i]
+            if current_lines + lines_needed > max_lines and current_page:
+                pages.append(current_page)
+                current_page = []
+                current_lines = 0
+            current_page.append(para)
+            current_lines += lines_needed
+
+        if closing:
+            current_page.extend(closing)
+        if current_page:
+            pages.append(current_page)
+
+        num_pages = len(pages)
+        if num_pages > max_pages:
+            continue
+
+        # Verify all pages actually fit
+        fits = all(
+            _estimate_text_height(p, test_font, is_first_page=(i == 0)) <= max_height
+            for i, p in enumerate(pages)
+        )
+        if not fits:
+            continue
+
+        if prefer_readability:
+            # Passion mode: largest font first (we iterate large→small, so first valid wins)
+            return num_pages, test_font, pages
+
+        # Prefer fewer pages; among equal page counts prefer larger font
+        if num_pages < best_num or (num_pages == best_num and test_font > best_font):
+            best_num = num_pages
+            best_font = test_font
+            best_pages = pages
 
     if best_pages:
-        return best_num_pages, best_font, best_pages
+        return best_num, best_font, best_pages
 
-    # Fallback: 2 pages, even split, minimum font
-    mid = math.ceil(n / 2)
-    fallback_pages = [
-        header_content + body_content[:mid],
-        body_content[mid:] + closing,
-    ]
-    return 2, FONT_SIZE_MIN, fallback_pages
+    # Fallback: even split at minimum font
+    pages_needed = min(max_pages, n + 1)
+    chunk_size = math.ceil(n / max(pages_needed - 1, 1))
+    fallback_pages = []
+    for i in range(0, n, chunk_size):
+        chunk = body_content[i:i + chunk_size]
+        if i == 0:
+            chunk = header_content + chunk
+        fallback_pages.append(chunk)
+    if closing and fallback_pages:
+        fallback_pages[-1].extend(closing)
+    return len(fallback_pages), FONT_SIZE_MIN, fallback_pages
 
 
 def _create_two_page_pagination(
@@ -855,30 +1148,17 @@ def draw_post(thedate: str, verse_break: int = 0) -> List[str]:
         List of generated file paths
     """
     verse_break = int(verse_break)
-    url = f"{LITURGY_URL_PL}/{thedate}"
 
     logger.info(f"Fetching readings for {thedate}")
 
     try:
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()
-    except requests.RequestException as e:
+        content_list = _scrape_content_list(thedate)
+    except (requests.RequestException, ValueError) as e:
         logger.error(f"Failed to fetch readings: {e}")
         return []
 
-    soup = BeautifulSoup(response.content, "html.parser")
-
-    try:
-        content_areas = soup.find_all("div", "txt__rich-area")
-        if len(content_areas) < 2:
-            logger.error("Could not find reading content on page")
-            return []
-        content_list = content_areas[1].get_text().split("\n")
-    except (IndexError, AttributeError) as e:
-        logger.error(f"Failed to parse page content: {e}")
-        return []
-
     # Process content
+    content_list = _normalize_vigil_markers(content_list, thedate)
     content_list = _clean_content_list(content_list)
     content_list = _normalize_readings(content_list)
 
@@ -899,12 +1179,22 @@ def draw_post(thedate: str, verse_break: int = 0) -> List[str]:
     _remove_liturgical_notes(content_dic)
     _normalize_sekwencja_content(content_dic)
 
+    # Normalise Gospel header structure
+    _ensure_gospel_subtitle_slot(content_dic)
+    _normalize_passion_gospel_header(content_dic)
     # Detect Passion Gospel (Palm Sunday / Good Friday) — very long Gospel
-    is_passion = len(content_dic.get("EWANGELIA", [])) > PASSION_SPLIT_THRESHOLD * 3
+    # Count body paragraphs only (exclude 3 header items + 1 closing) to avoid
+    # false positives on normal-length Gospels with many short paragraphs
+    gospel_body_count = max(len(content_dic.get("EWANGELIA", [])) - 4, 0)
+    is_passion = gospel_body_count > PASSION_SPLIT_THRESHOLD * 3
+    # Split long Gospel paragraphs so the paginator can use a larger font
+    _split_long_gospel_paragraphs(content_dic)
 
-    # Create output directory
+    # Create output directory and clear stale reading images from previous runs
     output_path = WEB_DIR / thedate
     output_path.mkdir(parents=True, exist_ok=True)
+    for stale in output_path.glob("*.jpg"):
+        stale.unlink()
 
     # Generate images
     background = _create_background()
@@ -916,16 +1206,11 @@ def draw_post(thedate: str, verse_break: int = 0) -> List[str]:
         order_file.write_text("\n".join(posts_list), encoding="utf-8")
         logger.info(f"Easter Vigil: {len(posts_list)} images, order saved to _order.txt")
     else:
-        posts_list = _generate_reading_images(content_dic, background, output_path, verse_break)
+        posts_list = _generate_reading_images(content_dic, background, output_path, verse_break, passion_mode=is_passion)
         posts_list.append(_generate_psalm_image(content_dic, background, output_path))
 
-    # Write passion marker for publish() to detect
-    passion_marker = output_path / ".passion"
     if is_passion:
-        passion_marker.touch()
-        logger.info(f"Passion Gospel detected — will publish as 2 carousels")
-    elif passion_marker.exists():
-        passion_marker.unlink()  # clean up if re-generated
+        logger.info(f"Passion Gospel detected — Gospel will use extended pagination")
 
     logger.info(f"Generated {len(posts_list)} images")
 
@@ -1129,7 +1414,7 @@ Grafika wykonana za pomocą sztucznej inteligencji.
 
 
 @eel.expose
-def publish(thedate: str, caption: str) -> bool:
+def publish(thedate: str, caption: str) -> str:
     """
     Publish images to Instagram.
 
@@ -1138,23 +1423,28 @@ def publish(thedate: str, caption: str) -> bool:
         caption: Custom caption text
 
     Returns:
-        True if successful, False otherwise
+        Empty string if successful, error message otherwise
     """
     try:
         client = login_user()
     except Exception as e:
-        logger.error(f"Failed to login to Instagram: {e}")
-        return False
+        msg = f"Failed to login to Instagram: {e}"
+        logger.error(msg)
+        return msg
 
     working_path = WEB_DIR / thedate
 
     # Detect Easter week special days
-    is_passion = (working_path / ".passion").exists()
     is_vigil = (working_path / "_order.txt").exists()
 
     # Order files: cover first (any non-reading image), then readings in order
     # SEKWENCJA is between DRUGIE and EWANGELIA
-    reading_prefixes = ["PIERWSZE", "PSALM", "DRUGIE", "SEKWENCJA", "EWANGELIA"]
+    # Include vigil reading prefixes so they aren't mistaken for cover images
+    reading_prefixes = [
+        "PIERWSZE", "PSALM", "DRUGIE", "TRZECIE", "CZWARTE",
+        "PIĄTE", "SZÓSTE", "SIÓDME", "ÓSME",
+        "SEKWENCJA", "EWANGELIA",
+    ]
     all_images = sorted(f for f in os.listdir(working_path) if f.endswith((".jpg", ".webp", ".png", ".jpeg")))
 
     # Convert cover images to 1080x1080 JPEG (Instagram requires consistent dimensions)
@@ -1185,8 +1475,14 @@ def publish(thedate: str, caption: str) -> bool:
                     ordered_files.append(working_path / filename)
 
     if not ordered_files:
-        logger.error("No files found to publish")
-        return False
+        msg = "No files found to publish"
+        logger.error(msg)
+        return msg
+
+    if len(ordered_files) > MAX_CAROUSEL_IMAGES:
+        msg = f"Too many images ({len(ordered_files)}) — Instagram limit is {MAX_CAROUSEL_IMAGES}"
+        logger.error(msg)
+        return msg
 
     # Build caption
     full_caption = _build_caption(caption, thedate)
@@ -1198,37 +1494,20 @@ def publish(thedate: str, caption: str) -> bool:
         )
     }
 
-    def _upload(paths: List[str], cap: str) -> bool:
-        try:
-            client.album_upload(paths=paths, caption=cap, extra_data=alt_text)
-            return True
-        except Exception as e:
-            logger.error(f"Failed to publish: {e}")
-            return False
+    logger.info(f"Publishing {len(ordered_files)} images for {thedate}")
+    try:
+        client.album_upload(
+            paths=[str(p) for p in ordered_files],
+            caption=full_caption,
+            extra_data=alt_text,
+        )
+    except Exception as e:
+        msg = f"Failed to publish: {e}"
+        logger.error(msg)
+        return msg
 
-    if is_passion:
-        # Split into 2 carousels: readings (part 1) and Gospel/Passion (part 2)
-        part1 = [p for p in ordered_files if "EWANGELIA" not in p.name]
-        part2 = [p for p in ordered_files if "EWANGELIA" in p.name]
-
-        if not part1 or not part2:
-            logger.warning("Passion split failed — publishing as single carousel")
-            return _upload([str(p) for p in ordered_files], full_caption)
-
-        caption1 = _build_caption(caption, thedate).rstrip() + "\n\ncześć 1/2\n"
-        caption2 = _build_caption(caption, thedate).rstrip() + "\n\ncześć 2/2\n"
-
-        ok1 = _upload([str(p) for p in part1], caption1)
-        ok2 = _upload([str(p) for p in part2], caption2)
-
-        if ok1 and ok2:
-            logger.info(f"Successfully published Passion post for {thedate} (2 carousels)")
-        return ok1 and ok2
-    else:
-        ok = _upload([str(p) for p in ordered_files], full_caption)
-        if ok:
-            logger.info(f"Successfully published post for {thedate}")
-        return ok
+    logger.info(f"Successfully published post for {thedate}")
+    return ""
 
 
 # =============================================================================
@@ -1243,25 +1522,25 @@ def _get_readings_dict(thedate: str) -> Dict[str, List[str]]:
     This is a helper that extracts the readings parsing logic
     so it can be reused by cover generation functions.
     """
-    url = f"{LITURGY_URL_PL}/{thedate}"
-
-    response = requests.get(url, timeout=30)
-    response.raise_for_status()
-
-    soup = BeautifulSoup(response.content, "html.parser")
-    content_areas = soup.find_all("div", "txt__rich-area")
-
-    if len(content_areas) < 2:
-        raise ValueError("Could not find reading content on page")
-
-    content_list = content_areas[1].get_text().split("\n")
+    content_list = _scrape_content_list(thedate)
+    content_list = _normalize_vigil_markers(content_list, thedate)
     content_list = _clean_content_list(content_list)
     content_list = _normalize_readings(content_list)
-    content_dic = _parse_readings(content_list)
 
+    is_vigil = "TRZECIE CZYTANIE" in content_list
+    if is_vigil:
+        content_dic = _parse_vigil_readings(content_list)
+        content_dic = _filter_easter_vigil(content_dic)
+    else:
+        content_dic = _parse_readings(content_list)
+
+    _add_psalm_refrains(content_dic)
     _truncate_readings(content_dic)
     _clean_gospel_markers(content_dic)
+    _remove_pre_gospel_from_reading(content_dic)
     _remove_liturgical_notes(content_dic)
+    _normalize_sekwencja_content(content_dic)
+    _ensure_gospel_subtitle_slot(content_dic)
 
     return content_dic
 
