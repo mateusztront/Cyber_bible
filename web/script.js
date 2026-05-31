@@ -628,24 +628,27 @@ document.querySelector(".publish").onclick = async function() {
 
     try {
         const publish_answer = await eel.publish(thedate, cap)();
+        const ok = !publish_answer;
 
         const container = document.getElementById('content-container');
         const newDiv = document.createElement('div');
+        newDiv.style.color = ok ? 'green' : 'red';
+        newDiv.style.whiteSpace = 'pre-wrap';
         const newContent = document.createTextNode(
-            publish_answer ? 'Published successfully!' : 'Publication failed'
+            ok ? 'Published successfully!' : 'Publication failed:\n' + publish_answer
         );
         newDiv.appendChild(newContent);
         container.appendChild(newDiv);
 
         // Play notification sound
-        if (publish_answer) {
+        if (ok) {
             playNotificationSound('complete');
         } else {
             playNotificationSound('error');
         }
     } catch (error) {
         console.error('Error publishing:', error);
-        alert('Error publishing. Check console for details.');
+        alert('Error publishing: ' + (error.errorText || error.message || error));
     }
 }
 

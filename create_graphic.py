@@ -92,9 +92,19 @@ def _create_background() -> Image.Image:
 
 
 def _get_liturgical_year(date_str: str) -> str:
-    """Determine liturgical year (A, B, or C) from date string."""
+    """Determine liturgical year (A, B, or C) from date string.
+
+    Sunday cycle: Year A=2023/2026/2029, Year B=2024/2027/2030, Year C=2025/2028/2031,
+    i.e. year % 3 maps 1→A, 2→B, 0→C.
+    """
     year = int(date_str[:4])
-    return {0: "A", 1: "B", 2: "C"}[year % 3]
+    return {0: "C", 1: "A", 2: "B"}[year % 3]
+
+
+# Matches Gospel year-variant headers: "EWANGELIA W ROKU B" or "EWANGELIA W LATACH B i C".
+_GOSPEL_VARIANT_RE = re.compile(
+    r"^EWANGELIA W (?:ROKU|LATACH)\s+([ABC](?:\s*(?:,|i)\s*[ABC])*)\s*$"
+)
 
 
 def _scrape_content_list(thedate: str) -> List[str]:
@@ -172,32 +182,37 @@ def _normalize_vigil_markers(content_list: List[str], thedate: str) -> List[str]
         if "ÓSME CZYTANIE" in text and "EPISTOŁA" in text.upper():
             result[i] = "ÓSME CZYTANIE"
 
-    # Select correct Gospel year, remove other years
-    target_marker = f"EWANGELIA W ROKU {liturgical_year}"
-    other_markers = [f"EWANGELIA W ROKU {y}" for y in "ABC" if y != liturgical_year]
-
-    # Find and rename target Gospel
+    # Select correct Gospel year variant, remove others.
+    # Markers come in two shapes:
+    #   "EWANGELIA W ROKU X"        (single year)
+    #   "EWANGELIA W LATACH X i Y"  (two years; rarer: "X, Y i Z")
+    # Find every variant header, parse the set of years it covers, keep the
+    # one that includes the current liturgical_year, drop the rest.
+    variants = []
     for i, text in enumerate(result):
-        if text.strip() == target_marker:
-            result[i] = "EWANGELIA"
-            break
+        m = _GOSPEL_VARIANT_RE.match(text.strip())
+        if m:
+            years = set(re.findall(r"[ABC]", m.group(1)))
+            variants.append((i, years))
 
-    # Remove content for other Gospel years
-    for other in other_markers:
-        try:
-            start = result.index(other)
-            # Find "Oto słowo Pańskie." ending this section
-            end = start + 1
-            for j in range(start + 1, len(result)):
-                if result[j].strip() == "Oto słowo Pańskie.":
-                    end = j + 1
-                    break
-                if result[j].strip() in [target_marker, "EWANGELIA"] + other_markers:
-                    end = j
-                    break
-            del result[start:end]
-        except ValueError:
-            pass
+    keep_idx = next((i for i, ys in variants if liturgical_year in ys), None)
+    if keep_idx is not None:
+        result[keep_idx] = "EWANGELIA"
+
+    # Delete other variants' sections (reverse order so earlier indices stay valid)
+    for i, _ys in sorted(variants, key=lambda v: v[0], reverse=True):
+        if i == keep_idx:
+            continue
+        end = i + 1
+        for j in range(i + 1, len(result)):
+            line = result[j].strip()
+            if line == "Oto słowo Pańskie.":
+                end = j + 1
+                break
+            if line == "EWANGELIA" or _GOSPEL_VARIANT_RE.match(line):
+                end = j
+                break
+        del result[i:end]
 
     return result
 
@@ -400,6 +415,30 @@ def _normalize_readings(content_list: List[str]) -> List[str]:
     except ValueError:
         pass
 
+    # Drop malformed "lub" alternative First Reading variant.
+    # Optional-memorial pages on liturgia.wiara.pl sometimes list two first-reading
+    # options separated by "lub". Occasionally the first variant omits the
+    # "Czytanie z..." intro line, which would land scripture text in the bold-intro
+    # slot when rendered. When that happens, drop the malformed variant so the
+    # second (well-formed) variant is used instead.
+    try:
+        first_idx = result.index("PIERWSZE CZYTANIE")
+        lub_idx = next(
+            (i for i in range(first_idx + 1, len(result)) if result[i].strip() == "lub"),
+            None,
+        )
+        if lub_idx is not None:
+            second_idx = result.index("PIERWSZE CZYTANIE", lub_idx)
+            first_has_intro = any(
+                line.strip().startswith("Czytanie z")
+                for line in result[first_idx + 1:lub_idx]
+            )
+            if not first_has_intro:
+                del result[first_idx:lub_idx + 1]
+                logger.debug("Dropped first-reading variant lacking 'Czytanie z' intro")
+    except ValueError:
+        pass
+
     # Remove processional Gospel (Palm Sunday - not part of Liturgia Słowa)
     try:
         proc_start = result.index("PROCESJA Z PALMAMI")
@@ -556,6 +595,38 @@ def _filter_easter_vigil(content_dic: Dict[str, List[str]]) -> Dict[str, List[st
     return result
 
 
+_ALT_REFRAIN_RE = re.compile(r"^\d+\.\s+(.+)$")
+
+
+def _collapse_alternative_refrains(psalm: List[str]) -> None:
+    """
+    Some days liturgia.wiara.pl offers multiple alternative refrains as numbered lines
+    directly under a bare ``Refren:`` marker, e.g.::
+
+        Refren:
+        1. Kościół nie zginie, Bóg jest w jego wnętrzu.
+        2. Tyś wielką chlubą Kościoła świętego.
+
+        [stanzas...]
+
+    The parser leaves ``psalm[1] == 'Refren:'`` (empty refrain text) and the numbered
+    alternatives bleed into the stanza area. Pick the first alternative as the refrain
+    text and drop the rest so the rendered image shows a real refrain and clean stanzas.
+    """
+    if len(psalm) < 3:
+        return
+    if psalm[1].strip().rstrip(":").strip() != "Refren":
+        return
+    match = _ALT_REFRAIN_RE.match(psalm[2].strip())
+    if not match:
+        return
+    psalm[1] = f"Refren: {match.group(1)}"
+    end = 3
+    while end < len(psalm) and _ALT_REFRAIN_RE.match(psalm[end].strip()):
+        end += 1
+    del psalm[2:end]
+
+
 def _add_psalm_refrains(content_dic: Dict[str, List[str]]) -> None:
     """Add refrain markers to psalm(s) if missing. Handles both regular and numbered vigil psalms."""
     psalm_keys = ["PSALM RESPONSORYJNY"] + [f"{i} PSALM RESPONSORYJNY" for i in range(1, 9)]
@@ -564,6 +635,7 @@ def _add_psalm_refrains(content_dic: Dict[str, List[str]]) -> None:
         if psalm_key not in content_dic:
             continue
         psalm = content_dic[psalm_key]
+        _collapse_alternative_refrains(psalm)
         refrain_count = reduce(lambda x, y: x + 1 if "Refren" in y else x, psalm, 0)
         if len(psalm) > 6 and refrain_count == 1:
             for pos in [16, 11, 6]:
@@ -601,40 +673,45 @@ def _ensure_gospel_subtitle_slot(content_dic: Dict[str, List[str]]) -> None:
         content_dic["EWANGELIA"] = [gospel[0], ""] + gospel[1:]
 
 
-def _split_long_gospel_paragraphs(content_dic: Dict[str, List[str]], max_chars: int = 350) -> None:
+def _split_long_paragraphs(content_dic: Dict[str, List[str]], max_chars: int = 350) -> None:
     """
-    Split Gospel body paragraphs longer than max_chars at sentence boundaries.
-    This lets the pagination algorithm use a larger font by keeping each chunk short.
-    """
-    if "EWANGELIA" not in content_dic:
-        return
-    gospel = content_dic["EWANGELIA"]
-    if len(gospel) < 4:
-        return
+    Split body paragraphs longer than max_chars at sentence boundaries.
 
+    The paginator only breaks BETWEEN paragraphs — a single paragraph that
+    exceeds what fits at FONT_SIZE_MIN overflows the image because the fallback
+    even-split can't divide one paragraph in half. Applies to every reading
+    (Gospel and the CZYTANIA), since long Pauline/Acts passages (e.g. Paul's
+    Areopagus speech) hit the same problem the Passion Gospel does.
+    """
     # Sentence boundary: period/exclamation/question followed by space + uppercase or quote
     sentence_end = re.compile(r'(?<=[.!?])\s+(?=[A-ZŁŚŻŹĆĄĘÓŃ«"\u201c\u201e])')
 
-    new_body: List[str] = []
-    for para in gospel[3:-1]:
-        if len(para) <= max_chars:
-            new_body.append(para)
+    for key, reading in list(content_dic.items()):
+        if "CZYTANIE" not in key and key not in ("EWANGELIA", "EWANGELIA KRÓTSZA"):
             continue
-        # Split at sentence boundaries, keeping chunks under max_chars
-        sentences = sentence_end.split(para)
-        chunk = ""
-        for sent in sentences:
-            candidate = (chunk + " " + sent).strip() if chunk else sent
-            if len(candidate) <= max_chars:
-                chunk = candidate
-            else:
-                if chunk:
-                    new_body.append(chunk)
-                chunk = sent
-        if chunk:
-            new_body.append(chunk)
+        if len(reading) < 4:
+            continue
 
-    content_dic["EWANGELIA"] = gospel[:3] + new_body + gospel[-1:]
+        new_body: List[str] = []
+        for para in reading[3:-1]:
+            if len(para) <= max_chars:
+                new_body.append(para)
+                continue
+            # Split at sentence boundaries, keeping chunks under max_chars
+            sentences = sentence_end.split(para)
+            chunk = ""
+            for sent in sentences:
+                candidate = (chunk + " " + sent).strip() if chunk else sent
+                if len(candidate) <= max_chars:
+                    chunk = candidate
+                else:
+                    if chunk:
+                        new_body.append(chunk)
+                    chunk = sent
+            if chunk:
+                new_body.append(chunk)
+
+        content_dic[key] = reading[:3] + new_body + reading[-1:]
 
 
 def _normalize_sekwencja_content(content_dic: Dict[str, List[str]]) -> None:
@@ -763,6 +840,21 @@ def _generate_reading_images(
         if num_pages == 1:
             # Single page - use optimal font calculated by pagination
             result = draw_text(content_dic, background, reading_name, optimal_font)
+
+            # The estimator can be optimistic (it counts characters via textwrap,
+            # not real glyph widths). Verify the rendered text actually fits and
+            # shrink the font if the closing line would clip the bottom edge.
+            while not _text_fits(result["drawn_y"], optimal_font) and optimal_font > FONT_SIZE_MIN:
+                optimal_font -= 1
+                result = draw_text(content_dic, background, reading_name, optimal_font)
+
+            if not _text_fits(result["drawn_y"], optimal_font):
+                logger.warning(
+                    f"{reading_name}: text overflows at min font {optimal_font} "
+                    f"(drawn_y={result['drawn_y']})"
+                )
+
+            logger.info(f"  {reading_name} final font: {optimal_font}")
             result["picture"].save(output_path / f"{reading_name}.jpg")
             posts_list.append(f"{reading_name}.jpg")
 
@@ -817,7 +909,7 @@ def _render_smart_pages(
         results.append(result)
 
     # Check if all pages fit, reduce font size if needed
-    while any(r["drawn_y"] > IMAGE_SIZE - 20 for r in results) and font_size >= FONT_SIZE_MIN:
+    while any(not _text_fits(r["drawn_y"], font_size) for r in results) and font_size >= FONT_SIZE_MIN:
         font_size -= 1
         results = []
 
@@ -865,10 +957,12 @@ def _estimate_text_height(content: List[str], font_size: int, is_first_page: boo
         subtitle = content[1] if len(content) > 1 else ""
         if subtitle:
             total_lines += 1
-        # Bold intro: count actual wrapped lines
+        # Bold intro: count wrapped lines using a tighter width — bold glyphs
+        # render ~10% wider per char than the regular font this width is calibrated for
         intro = content[2] if len(content) > 2 else ""
         if intro:
-            total_lines += max(len(textwrap.wrap(intro, width=width)), 1)
+            bold_width = max(int(width * 0.9), 1)
+            total_lines += max(len(textwrap.wrap(intro, width=bold_width)), 1)
         # Gap between header and body
         total_lines += 1
         body_start = 3
@@ -884,6 +978,27 @@ def _estimate_text_height(content: List[str], font_size: int, is_first_page: boo
 
 MAX_PAGES_PER_READING = 4
 MAX_PAGES_GOSPEL = 14  # Passion Gospels spread across more pages for readability
+
+# Filename substrings that identify generated reading images. Anything else in
+# a date folder (cover.jpg, mateusztront.jpg, midjourney drops) is treated as a
+# cover and must be preserved when text graphics are regenerated.
+READING_PREFIXES = (
+    "PIERWSZE", "PSALM", "DRUGIE", "TRZECIE", "CZWARTE",
+    "PIĄTE", "SZÓSTE", "SIÓDME", "ÓSME",
+    "SEKWENCJA", "EWANGELIA",
+)
+
+
+def _text_fits(drawn_y: int, font_size: int) -> bool:
+    """
+    Check whether the rendered text fits inside the image without clipping.
+
+    drawn_y points at the anchor of the last drawn line (anchor="lm" puts the
+    text middle there), so glyphs extend ~font_size/2 below it. We require a
+    full font-size margin so descenders and accented Polish chars stay clear of
+    the bottom edge.
+    """
+    return drawn_y <= IMAGE_SIZE - font_size
 
 
 def _build_pages(header_content, body_content, closing, split_indices):
@@ -949,7 +1064,8 @@ def _calculate_optimal_pagination(
         if len(content) > 1 and content[1]:
             header_lines += 1
         if len(content) > 2 and content[2]:
-            header_lines += max(len(textwrap.wrap(content[2], width=width)), 1)
+            bold_width = max(int(width * 0.9), 1)
+            header_lines += max(len(textwrap.wrap(content[2], width=bold_width)), 1)
         header_lines += 1  # gap
         margin = test_font * 2
         max_lines = (max_height - margin) // line_height
@@ -1044,7 +1160,7 @@ def _render_two_pages(
     result_1 = draw_text_pagination_first(background, pages[keys[0]], font_size=font_size)
     result_2 = draw_text_pagination_second(background, pages[keys[1]], font_size=font_size)
 
-    while result_1["drawn_y"] > IMAGE_SIZE - 20 or result_2["drawn_y"] > IMAGE_SIZE - 20:
+    while not _text_fits(result_1["drawn_y"], font_size) or not _text_fits(result_2["drawn_y"], font_size):
         font_size -= 1
         result_1 = draw_text_pagination_first(background, pages[keys[0]], font_size=font_size)
         result_2 = draw_text_pagination_second(background, pages[keys[1]], font_size=font_size)
@@ -1064,7 +1180,7 @@ def _render_four_pages(
     result_6 = draw_text_pagination_second(background, pages[keys[3]], font_size=font_size)
 
     while any(
-        r["drawn_y"] > IMAGE_SIZE - 20 for r in [result_1, result_2, result_3, result_6]
+        not _text_fits(r["drawn_y"], font_size) for r in [result_1, result_2, result_3, result_6]
     ):
         font_size -= 1
         result_1 = draw_text_pagination_first(background, pages[keys[0]], font_size=font_size)
@@ -1093,7 +1209,7 @@ def _generate_psalm_image(
     font_size = FONT_SIZE_PSALM
     result = draw_psalm(content_dic, background, font_size, num=num)
 
-    while result["drawn_y"] > IMAGE_SIZE - 20:
+    while not _text_fits(result["drawn_y"], font_size):
         font_size -= 1
         result = draw_psalm(content_dic, background, font_size, num=num)
 
@@ -1187,14 +1303,19 @@ def draw_post(thedate: str, verse_break: int = 0) -> List[str]:
     # false positives on normal-length Gospels with many short paragraphs
     gospel_body_count = max(len(content_dic.get("EWANGELIA", [])) - 4, 0)
     is_passion = gospel_body_count > PASSION_SPLIT_THRESHOLD * 3
-    # Split long Gospel paragraphs so the paginator can use a larger font
-    _split_long_gospel_paragraphs(content_dic)
+    # Split overlong body paragraphs (any reading) so the paginator can place
+    # them without overflowing — needed for long Pauline speeches as well as
+    # Passion Gospels.
+    _split_long_paragraphs(content_dic)
 
-    # Create output directory and clear stale reading images from previous runs
+    # Create output directory and clear stale reading images from previous runs.
+    # Preserve cover images (anything not matching a reading prefix) so users can
+    # regenerate text graphics without losing a cover they've already prepared.
     output_path = WEB_DIR / thedate
     output_path.mkdir(parents=True, exist_ok=True)
     for stale in output_path.glob("*.jpg"):
-        stale.unlink()
+        if any(p in stale.name for p in READING_PREFIXES):
+            stale.unlink()
 
     # Generate images
     background = _create_background()
@@ -1439,12 +1560,7 @@ def publish(thedate: str, caption: str) -> str:
 
     # Order files: cover first (any non-reading image), then readings in order
     # SEKWENCJA is between DRUGIE and EWANGELIA
-    # Include vigil reading prefixes so they aren't mistaken for cover images
-    reading_prefixes = [
-        "PIERWSZE", "PSALM", "DRUGIE", "TRZECIE", "CZWARTE",
-        "PIĄTE", "SZÓSTE", "SIÓDME", "ÓSME",
-        "SEKWENCJA", "EWANGELIA",
-    ]
+    reading_prefixes = READING_PREFIXES
     all_images = sorted(f for f in os.listdir(working_path) if f.endswith((".jpg", ".webp", ".png", ".jpeg")))
 
     # Convert cover images to 1080x1080 JPEG (Instagram requires consistent dimensions)
@@ -1459,6 +1575,11 @@ def publish(thedate: str, caption: str) -> str:
             if src != dst:
                 src.unlink()
             cover_files.append(dst)
+
+    if not cover_files:
+        msg = f"No cover image found — add a file starting with 'cover' or 'mateusztront' to web/{thedate}/"
+        logger.error(msg)
+        return msg
 
     if is_vigil:
         # Use the ordering file written by draw_post()
@@ -1554,6 +1675,7 @@ def get_readings_for_cover(thedate: str) -> Dict[str, str]:
     """
     try:
         content_dic = _get_readings_dict(thedate)
+        logger.info(f"get_readings_for_cover({thedate}) -> {list(content_dic.keys())}")
 
         # Return preview (first few lines) of each reading
         return {

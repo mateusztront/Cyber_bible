@@ -15,7 +15,11 @@ from create_graphic import (
     _remove_pre_gospel_from_reading,
     _create_two_page_pagination,
     _create_four_page_pagination,
+    _estimate_text_height,
+    _calculate_optimal_pagination,
+    MAX_PAGES_PER_READING,
 )
+from draw_posts import _calculate_layout
 
 
 class TestCleanContentList:
@@ -46,6 +50,47 @@ class TestCleanContentList:
         content = ["normal text", "Jezus przed Piłatem", "more text"]
         result = _clean_content_list(content)
         assert "Jezus przed Piłatem" not in result
+
+    def test_skips_passion_rubric_legend_lines(self):
+        content = [
+            "normal text",
+            "+ — słowa Chrystusa",
+            "E — słowa Ewangelisty",
+            "I — słowa innych osób pojedynczych",
+            "T — słowa kilku osób lub tłumu",
+            "more scripture text",
+        ]
+        result = _clean_content_list(content)
+        joined = " ".join(result)
+        assert "słowa Chrystusa" not in joined
+        assert "słowa Ewangelisty" not in joined
+        assert "słowa innych osób pojedynczych" not in joined
+        assert "słowa kilku osób lub tłumu" not in joined
+        assert "normal text" in result
+        assert "more scripture text" in result
+
+    def test_judasz_header_removed_but_scripture_kept(self):
+        content = [
+            "Judasz",
+            "Także i Judasz, który Go wydał, znał to miejsce.",
+        ]
+        result = _clean_content_list(content)
+        assert "Judasz" not in result
+        assert any("Judasz" in line for line in result)
+
+    def test_skips_good_friday_section_headers(self):
+        content = [
+            "Przed Piłatem",
+            "Przesłuchanie",
+            "\u201eOto człowiek\u201d",
+            "Wyrok",
+            "Testament dany z krzyża",
+            "Przebicie serca",
+            "Złożenie Jezusa do grobu",
+            "scripture paragraph stays",
+        ]
+        result = _clean_content_list(content)
+        assert result == ["scripture paragraph stays"]
 
 
 class TestNormalizeReadings:
@@ -264,3 +309,46 @@ class TestBuildCaption:
     def test_caption_text_preserved(self):
         result = _build_caption("Pierwsze czytanie.", "2026-03-24")
         assert result.startswith("Pierwsze czytanie.")
+
+
+class TestPaginationWidthFormula:
+    """Ensure estimation width is conservative relative to the rendering layout."""
+
+    @pytest.mark.parametrize("font_size", [30, 34, 40, 44, 50, 60])
+    def test_width_conservative_vs_layout(self, font_size):
+        # Estimation uses layout width minus 3-char safety margin
+        size_x_left = int(25 / 12 * font_size)
+        est_width = int(75 - 0.325 * size_x_left) - 3
+
+        layout = _calculate_layout(font_size)
+
+        assert est_width == layout["width"] - 3
+        assert est_width < layout["width"]
+
+
+class TestGospelPagination:
+    """Ensure regular Gospels don't produce too many pages."""
+
+    def _make_gospel_content(self, body_chars=2000):
+        """Build a realistic Gospel content list with ~body_chars of body text."""
+        header = ["J 20, 11-18", "Słowa Ewangelii według Świętego Jana", "W pierwszy dzień tygodnia:"]
+        # Build body paragraphs ~200 chars each
+        para = "Jezus powiedział do swoich uczniów słowa, które napełniły ich serca radością i nadzieją na przyszłość, bo wiedzieli że Pan jest z nimi zawsze aż do skończenia świata. "
+        num_paras = body_chars // len(para)
+        body = [para.strip() for _ in range(max(num_paras, 1))]
+        closing = "Oto Słowo Pańskie."
+        return header + body + [closing]
+
+    def test_regular_gospel_max_4_pages(self):
+        content = self._make_gospel_content(2000)
+        num_pages, font, pages = _calculate_optimal_pagination(
+            content, 44, reading_name="EWANGELIA", max_pages=MAX_PAGES_PER_READING,
+        )
+        assert num_pages <= MAX_PAGES_PER_READING
+
+    def test_short_gospel_single_page(self):
+        content = self._make_gospel_content(400)
+        num_pages, font, pages = _calculate_optimal_pagination(
+            content, 44, reading_name="EWANGELIA", max_pages=MAX_PAGES_PER_READING,
+        )
+        assert num_pages == 1

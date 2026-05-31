@@ -10,6 +10,7 @@ from pathlib import Path
 
 from create_graphic import (
     _normalize_readings,
+    _normalize_vigil_markers,
     _parse_readings,
     _parse_vigil_readings,
     _filter_easter_vigil,
@@ -714,3 +715,113 @@ class TestPublishPassionSplit:
         caption = mock_client.album_upload.call_args[1]["caption"]
         assert "1/2" not in caption
         assert "2/2" not in caption
+
+
+# ---------------------------------------------------------------------------
+# _normalize_vigil_markers — Gospel year-variant headers
+# ---------------------------------------------------------------------------
+
+def _gospel_year_variants_content(roku_a: str, latach_bc: str):
+    """Build a content list with two Gospel variants headed by the given markers."""
+    return [
+        "PIERWSZE CZYTANIE",
+        "Dz 11, 1-18",
+        "Czytanie z Dziejów Apostolskich",
+        "Apostołowie usłyszeli, że poganie przyjęli słowo Boże.",
+        "Oto słowo Boże.",
+        "PSALM RESPONSORYJNY",
+        "Ps 42",
+        "Refren: Boga żywego pragnie dusza moja.",
+        "Jak łania pragnie wody.",
+        "Refren",
+        roku_a,
+        "J 10, 11-18",
+        "Słowa Ewangelii według Świętego Jana",
+        "Ja jestem dobrym pasterzem.",
+        "Oto słowo Pańskie.",
+        latach_bc,
+        "J 10, 1-10",
+        "Słowa Ewangelii według Świętego Jana",
+        "Kto nie wchodzi do owczarni przez bramę.",
+        "Oto słowo Pańskie.",
+    ]
+
+
+class TestNormalizeVigilMarkersGospelYearVariants:
+
+    def test_year_b_keeps_latach_bc_variant(self):
+        content = _gospel_year_variants_content(
+            "EWANGELIA W ROKU A", "EWANGELIA W LATACH B i C"
+        )
+        result = _normalize_vigil_markers(content, "2027-04-26")  # 2027 % 3 == 2 → B
+        assert "EWANGELIA" in result
+        assert "EWANGELIA W ROKU A" not in result
+        assert "EWANGELIA W LATACH B i C" not in result
+        # Year B/C body kept, Year A body dropped
+        assert "Kto nie wchodzi do owczarni przez bramę." in result
+        assert "Ja jestem dobrym pasterzem." not in result
+
+    def test_year_c_keeps_latach_bc_variant(self):
+        content = _gospel_year_variants_content(
+            "EWANGELIA W ROKU A", "EWANGELIA W LATACH B i C"
+        )
+        result = _normalize_vigil_markers(content, "2025-04-21")  # 2025 % 3 == 0 → C
+        assert "EWANGELIA" in result
+        assert "Kto nie wchodzi do owczarni przez bramę." in result
+        assert "Ja jestem dobrym pasterzem." not in result
+
+    def test_year_a_keeps_roku_a_variant(self):
+        content = _gospel_year_variants_content(
+            "EWANGELIA W ROKU A", "EWANGELIA W LATACH B i C"
+        )
+        result = _normalize_vigil_markers(content, "2026-04-27")  # 2026 % 3 == 1 → A
+        assert "EWANGELIA" in result
+        assert "EWANGELIA W ROKU A" not in result
+        assert "EWANGELIA W LATACH B i C" not in result
+        assert "Ja jestem dobrym pasterzem." in result
+        assert "Kto nie wchodzi do owczarni przez bramę." not in result
+
+    def test_three_single_year_variants_year_b(self):
+        # Backwards compat: original "EWANGELIA W ROKU X" three-way still works.
+        content = [
+            "PIERWSZE CZYTANIE", "Iz 1, 1", "Czytanie", "Treść.", "Oto słowo Boże.",
+            "PSALM RESPONSORYJNY", "Ps 1", "Refren: test.", "Werset.",
+            "EWANGELIA W ROKU A", "Mt 1, 1", "Słowa", "Tekst A.", "Oto słowo Pańskie.",
+            "EWANGELIA W ROKU B", "Mk 1, 1", "Słowa", "Tekst B.", "Oto słowo Pańskie.",
+            "EWANGELIA W ROKU C", "Łk 1, 1", "Słowa", "Tekst C.", "Oto słowo Pańskie.",
+        ]
+        result = _normalize_vigil_markers(content, "2027-04-26")  # B
+        assert "EWANGELIA" in result
+        assert "EWANGELIA W ROKU A" not in result
+        assert "EWANGELIA W ROKU B" not in result
+        assert "EWANGELIA W ROKU C" not in result
+        assert "Tekst B." in result
+        assert "Tekst A." not in result
+        assert "Tekst C." not in result
+
+    def test_no_gospel_variants_passes_through(self):
+        # Ordinary day: a single plain "EWANGELIA" header — nothing to rewrite.
+        content = [
+            "PIERWSZE CZYTANIE", "Iz 1, 1", "Czytanie", "Treść.", "Oto słowo Boże.",
+            "PSALM RESPONSORYJNY", "Ps 1", "Refren: test.", "Werset.",
+            "EWANGELIA", "J 1, 1", "Słowa", "Treść.", "Oto słowo Pańskie.",
+        ]
+        result = _normalize_vigil_markers(content, "2026-04-27")
+        assert result.count("EWANGELIA") == 1
+        assert "Treść." in result
+
+    def test_full_pipeline_yields_ewangelia_key_for_2026_04_27(self):
+        # End-to-end through normalize → clean → normalize_readings → parse:
+        # the Gospel must end up in the readings dict for 2026-04-27 (Year A).
+        from create_graphic import _clean_content_list
+
+        content = _gospel_year_variants_content(
+            "EWANGELIA W ROKU A", "EWANGELIA W LATACH B i C"
+        )
+        normalized = _normalize_vigil_markers(content, "2026-04-27")
+        cleaned = _clean_content_list(normalized)
+        normalized2 = _normalize_readings(cleaned)
+        parsed = _parse_readings(normalized2)
+        assert "EWANGELIA" in parsed
+        assert "PIERWSZE CZYTANIE" in parsed
+        assert "PSALM RESPONSORYJNY" in parsed

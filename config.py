@@ -116,12 +116,12 @@ SESSION_FILE = BASE_DIR / "session.json"
 # =============================================================================
 
 # Maximum images per Instagram carousel
-MAX_CAROUSEL_IMAGES = 10
+MAX_CAROUSEL_IMAGES = 20
 
 # Which of the 7 OT vigil readings to include (0-indexed: 0=1st, 2=3rd, 4=5th, 6=7th)
 EASTER_VIGIL_OT_READING_INDICES = [0, 2, 4, 6]
 
-# If EWANGELIA has more paragraphs than this threshold × 3, it's a Passion Gospel → split carousel
+# If EWANGELIA has more paragraphs than this threshold × 3, it's a Passion Gospel → allow extended pagination
 PASSION_SPLIT_THRESHOLD = 4
 
 # =============================================================================

@@ -72,6 +72,64 @@ def _calculate_layout(font_size: int) -> Dict[str, int]:
     }
 
 
+def _wrap_to_pixel_width(
+    draw: ImageDraw.Draw,
+    text: str,
+    font: ImageFont.FreeTypeFont,
+    max_width: float,
+) -> List[str]:
+    """
+    Greedy word-wrap that measures each line in real glyph pixels.
+
+    textwrap.wrap counts characters and is calibrated for the regular font, so
+    bold text (which is ~10% wider per glyph) overshoots the right edge when
+    wrapped that way. This helper guarantees every returned line renders within
+    max_width pixels in the supplied font.
+    """
+    words = text.split()
+    if not words:
+        return []
+    lines: List[str] = []
+    current = words[0]
+    for word in words[1:]:
+        candidate = f"{current} {word}"
+        if draw.textlength(candidate, font=font) <= max_width:
+            current = candidate
+        else:
+            lines.append(current)
+            current = word
+    lines.append(current)
+    return lines
+
+
+def _fit_reference_font(
+    draw: ImageDraw.Draw,
+    title: str,
+    reference: str,
+    fnt_b: ImageFont.FreeTypeFont,
+    font_size: int,
+    available_width: int,
+) -> ImageFont.FreeTypeFont:
+    """Return a bold font sized so title + reference fit on one line with a min gap."""
+    min_gap = font_size
+    title_width = draw.textlength(title, font=fnt_b)
+    if title_width + draw.textlength(reference, font=fnt_b) + min_gap <= available_width:
+        return fnt_b
+
+    max_ref_width = available_width - title_width - min_gap
+    for size in range(font_size - 1, 7, -1):
+        try:
+            trial = ImageFont.truetype(str(FONT_BOLD), size)
+        except OSError:
+            try:
+                trial = ImageFont.truetype(FONT_FALLBACK_BOLD, size)
+            except OSError:
+                return fnt_b
+        if draw.textlength(reference, font=trial) <= max_ref_width:
+            return trial
+    return fnt_b
+
+
 def _draw_justified_paragraph(
     draw: ImageDraw.Draw,
     paragraphs: List[str],
@@ -133,9 +191,9 @@ def _draw_justified_paragraph(
                 var_y += size_y
                 continue
 
-            # Calculate spacing for justified text
-            space_length_indented = (size_x_right - x_word - words_length) / (len(words) - 1)
-            space_length_regular = (size_x_right - words_length) / (len(words) - 1)
+            # Calculate spacing for justified text (clamp to prevent word overlap)
+            space_length_indented = max((size_x_right - x_word - words_length) / (len(words) - 1), 3)
+            space_length_regular = max((size_x_right - words_length) / (len(words) - 1), 3)
 
             # First line with indentation (except for special phrases)
             skip_indent = line == "Bracia:" or "Jezus powiedział" in line
@@ -181,25 +239,29 @@ def draw_text(
     size_x_right = layout["size_x_right"]
     size_y = layout["size_y"]
 
-    # Draw title and reference
+    # Draw title and reference (shrink reference font if it would overlap the title)
+    ref_font = _fit_reference_font(draw, name, content_dic[name][0], fnt_b, font_size, size_x_right)
     draw.text((size_x_left, size_x_left), name, font=fnt_b, fill="red", anchor="lm")
     draw.text(
         (size_x_right + size_x_left, size_x_left),
         content_dic[name][0],
-        font=fnt_b,
+        font=ref_font,
         fill="red",
         anchor="rm",
     )
 
-    # Draw subtitle
-    var_y = size_x_left + size_y
-    draw.text((size_x_left, var_y), content_dic[name][1], font=fnt_s, fill="black", anchor="lm")
+    # Draw subtitle (skip entirely if empty — e.g. Passion Gospel)
+    if content_dic[name][1]:
+        var_y = size_x_left + size_y
+        draw.text((size_x_left, var_y), content_dic[name][1], font=fnt_s, fill="black", anchor="lm")
+    else:
+        var_y = size_x_left
 
-    # Draw introduction paragraph in bold
-    lines = textwrap.wrap(content_dic[name][2], width=layout["width"], initial_indent="     ")
-    if lines:
-        lines[0] = lines[0].strip()
-        for line in lines:
+    # Draw introduction paragraph in bold (measured in real bold-glyph pixels —
+    # character-count wrap clips at the right edge for long titles)
+    intro_text = content_dic[name][2]
+    if intro_text:
+        for line in _wrap_to_pixel_width(draw, intro_text, fnt_b, size_x_right):
             var_y += size_y
             draw.text((size_x_left, var_y), line, font=fnt_b, fill="black", anchor="lm")
 
@@ -252,25 +314,29 @@ def draw_text_page(
     var_y = size_x_left
 
     if page_type == PageType.FIRST:
-        # Draw title and reference
+        # Draw title and reference (shrink reference font if it would overlap the title)
+        ref_font = _fit_reference_font(draw, reading_list[0], reading_list[1], fnt_b, font_size, size_x_right)
         draw.text((size_x_left, size_x_left), reading_list[0], font=fnt_b, fill="red", anchor="lm")
         draw.text(
             (size_x_right + size_x_left, size_x_left),
             reading_list[1],
-            font=fnt_b,
+            font=ref_font,
             fill="red",
             anchor="rm",
         )
 
-        # Draw subtitle
-        var_y = size_x_left + size_y
-        draw.text((size_x_left, var_y), reading_list[2], font=fnt_s, fill="black", anchor="lm")
+        # Draw subtitle (skip entirely if empty — e.g. Passion Gospel)
+        if reading_list[2]:
+            var_y = size_x_left + size_y
+            draw.text((size_x_left, var_y), reading_list[2], font=fnt_s, fill="black", anchor="lm")
+        else:
+            var_y = size_x_left
 
-        # Draw introduction in bold
-        lines = textwrap.wrap(reading_list[3], width=layout["width"], initial_indent="     ")
-        if lines:
-            lines[0] = lines[0].strip()
-            for line in lines:
+        # Draw introduction in bold (measured in real bold-glyph pixels —
+        # character-count wrap clips at the right edge for long titles)
+        intro_text = reading_list[3]
+        if intro_text:
+            for line in _wrap_to_pixel_width(draw, intro_text, fnt_b, size_x_right):
                 var_y += size_y
                 draw.text((size_x_left, var_y), line, font=fnt_b, fill="black", anchor="lm")
 
