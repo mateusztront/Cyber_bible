@@ -23,6 +23,9 @@ from config import (
 
 logger = logging.getLogger(__name__)
 
+# Right edge used for right-anchored text and line-fitting on psalm pages.
+RIGHT_MARGIN_X = 1000
+
 
 class PageType(Enum):
     """Type of page in a multi-page reading."""
@@ -401,6 +404,22 @@ def draw_text_pagination_second(
     return draw_text_page(out, reading_list, PageType.LAST, font_size)
 
 
+def _wrap_to_width(draw, text: str, font, max_width: float) -> List[str]:
+    """Split text into lines that each fit within max_width pixels."""
+    lines = []
+    current = ""
+    for word in text.split():
+        candidate = f"{current} {word}".strip()
+        if current and draw.textlength(candidate, font=font) > max_width:
+            lines.append(current)
+            current = word
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    return lines or [text]
+
+
 def draw_psalm(
     content_dic: Dict[str, List[str]],
     background: Image.Image,
@@ -442,6 +461,9 @@ def draw_psalm(
     y_distance = font_size_psalm
     y_further_distance = font_size_psalm * 0.7
     x_distance = font_size_psalm * 2
+    # Extra breathing room split evenly above/below each refrain so it sits
+    # centred in the gap between stanzas instead of hugging the verse above.
+    refrain_gap = y_further_distance / 2
 
     # Draw title and reference
     draw.text(
@@ -452,7 +474,7 @@ def draw_psalm(
         anchor="lm",
     )
     draw.text(
-        (1000, y_further_distance * 2),
+        (RIGHT_MARGIN_X, y_further_distance * 2),
         content_dic[psalm_key][0],
         font=fnt_b_psalm,
         fill="red",
@@ -481,9 +503,10 @@ def draw_psalm(
 
     for count, element in enumerate(content_dic[psalm_key][2:]):
         if "Refren" in element:
-            draw.text((x_distance, y_text), "Refren: ", font=fnt_b_psalm, fill="red", anchor="lm")
+            refrain_y = y_text + refrain_gap
+            draw.text((x_distance, refrain_y), "Refren: ", font=fnt_b_psalm, fill="red", anchor="lm")
             draw.text(
-                (x_distance * 3, y_text),
+                (x_distance * 3, refrain_y),
                 refrain_text,
                 font=fnt_b_psalm,
                 fill="black",
@@ -493,6 +516,8 @@ def draw_psalm(
 
         elif "ŚPIEW PRZED EWANGELIĄ" in element:
             # Handle acclamation before Gospel
+            # Keep the section break wider than the stanza gaps above it.
+            y_text += refrain_gap
             acclamation = content_dic[psalm_key][count + 2 :]
 
             # Fix acclamation format if needed
@@ -510,84 +535,87 @@ def draw_psalm(
             )
             if len(acclamation) > 1:
                 draw.text(
-                    (1000, y_text),
+                    (RIGHT_MARGIN_X, y_text),
                     acclamation[1],
                     font=fnt_b_psalm,
                     fill="red",
                     anchor="rm",
                 )
 
+            opening_y = y_text + y_further_distance * 2
             if len(acclamation) > 2:
                 draw.text(
-                    (x_distance, y_text + y_further_distance * 2),
+                    (x_distance, opening_y),
                     "Aklamacja: ",
                     font=fnt_b_psalm,
                     fill="red",
                     anchor="lm",
                 )
                 draw.text(
-                    (x_distance * 4, y_text + y_further_distance * 2),
+                    (x_distance * 4, opening_y),
                     acclamation[2],
                     font=fnt_b_psalm,
                     fill="black",
                     anchor="lm",
                 )
 
-            # Draw acclamation text with wrapping if needed
-            if len(acclamation) > 3:
-                if len(acclamation[3]) > 50:
-                    words = textwrap.wrap(acclamation[3], width=50)
-                    draw.text(
-                        (x_distance * 2, y_text + y_further_distance * 3 + y_distance),
-                        words[0],
-                        font=fnt_psalm,
-                        fill="black",
-                        anchor="lm",
-                    )
-                    if len(words) > 1:
-                        draw.text(
-                            (x_distance * 2, y_text + y_further_distance * 4 + y_distance),
-                            words[1],
-                            font=fnt_psalm,
-                            fill="black",
-                            anchor="lm",
-                        )
-                else:
-                    draw.text(
-                        (x_distance * 2, y_text + y_further_distance * 3 + y_distance),
-                        acclamation[3],
-                        font=fnt_psalm,
-                        fill="black",
-                        anchor="lm",
-                    )
+            # Draw the acclamation verse, keeping the source line breaks:
+            # shrink the font until every line fits, wrap only as a last resort.
+            # Equal gap above and below, so the verse sits centred between the
+            # opening and closing Aklamacja lines.
+            verse_gap = (y_further_distance * 3 + y_distance) / 2
+            verse_x = x_distance * 2
+            verse_y = opening_y + verse_gap
+            last_verse_y = opening_y
+            verse_lines = [line for line in acclamation[3:] if "Aklamacja" not in line]
 
-            if len(acclamation) > 4:
-                draw.text(
-                    (x_distance * 2, y_text + y_further_distance * 5 + y_distance),
-                    acclamation[4],
-                    font=fnt_psalm,
-                    fill="black",
-                    anchor="lm",
-                )
+            if verse_lines:
+                max_width = RIGHT_MARGIN_X - verse_x
+                fnt_verse = fnt_psalm
+                verse_size = font_size_psalm
+                min_size = max(int(font_size_psalm * 0.75), 1)
+                while verse_size > min_size and any(
+                    draw.textlength(line, font=fnt_verse) > max_width for line in verse_lines
+                ):
+                    verse_size -= 1
+                    fnt_verse, _, _ = _load_fonts(verse_size)
+
+                drawn_lines = []
+                for line in verse_lines:
+                    if draw.textlength(line, font=fnt_verse) > max_width:
+                        drawn_lines.extend(_wrap_to_width(draw, line, fnt_verse, max_width))
+                    else:
+                        drawn_lines.append(line)
+
+                for offset, line in enumerate(drawn_lines):
+                    draw.text(
+                        (verse_x, verse_y + offset * y_distance),
+                        line,
+                        font=fnt_verse,
+                        fill="black",
+                        anchor="lm",
+                    )
+                last_verse_y = verse_y + (len(drawn_lines) - 1) * y_distance
 
             # Final acclamation
+            closing_y = last_verse_y + verse_gap
             if len(acclamation) > 2:
                 draw.text(
-                    (x_distance, y_text + y_further_distance * 7 + y_distance),
+                    (x_distance, closing_y),
                     "Aklamacja: ",
                     font=fnt_b_psalm,
                     fill="red",
                     anchor="lm",
                 )
                 draw.text(
-                    (x_distance * 4, y_text + y_further_distance * 7 + y_distance),
+                    (x_distance * 4, closing_y),
                     acclamation[2],
                     font=fnt_b_psalm,
                     fill="black",
                     anchor="lm",
                 )
 
-            final_y_text = y_text + y_further_distance * 7 + y_distance
+            final_y_text = closing_y
             break
 
         elif "albo" in element:
