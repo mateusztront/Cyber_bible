@@ -404,6 +404,13 @@ def draw_text_pagination_second(
     return draw_text_page(out, reading_list, PageType.LAST, font_size)
 
 
+def _same_refrain(a: str, b: str) -> bool:
+    """Compare refrain lines ignoring case, surrounding space and final period."""
+    if not a or not b:
+        return False
+    return a.strip().rstrip(".").casefold() == b.strip().rstrip(".").casefold()
+
+
 def _wrap_to_width(draw, text: str, font, max_width: float) -> List[str]:
     """Split text into lines that each fit within max_width pixels."""
     lines = []
@@ -567,7 +574,14 @@ def draw_psalm(
             verse_x = x_distance * 2
             verse_y = opening_y + verse_gap
             last_verse_y = opening_y
-            verse_lines = [line for line in acclamation[3:] if "Aklamacja" not in line]
+            # Sources either prefix the repeated acclamation with "Aklamacja:" or
+            # repeat the bare text; either way it is drawn as the closing line.
+            refrain_line = acclamation[2] if len(acclamation) > 2 else ""
+            verse_lines = [
+                line
+                for line in acclamation[3:]
+                if "Aklamacja" not in line and not _same_refrain(line, refrain_line)
+            ]
 
             if verse_lines:
                 max_width = RIGHT_MARGIN_X - verse_x
