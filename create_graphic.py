@@ -378,6 +378,41 @@ def _normalize_readings(content_list: List[str]) -> List[str]:
     except ValueError:
         pass
 
+    # Handle combined longer/shorter Second Reading format - prefer shorter.
+    # Same stacked-header shape as the combined Gospel above, on Sundays that
+    # offer both pericopes in one body:
+    #   DRUGIE CZYTANIE DŁUŻSZE / <longer ref> / KRÓTSZE / <shorter ref> /
+    #   [subtitle] / Czytanie z... / text... / Koniec krótszej perykopy. /
+    #   text... / Oto słowo Boże.
+    # Without this the marker never matches a cut point and the whole reading
+    # is swallowed by the preceding psalm.
+    try:
+        if "DRUGIE CZYTANIE DŁUŻSZE" in result and "DRUGIE CZYTANIE KRÓTSZE" not in result:
+            longer_idx = result.index("DRUGIE CZYTANIE DŁUŻSZE")
+            krotsza_idx = result.index("KRÓTSZE", longer_idx)
+            reading_end = result.index("Oto słowo Boże.", krotsza_idx)
+            if krotsza_idx - longer_idx <= 3:
+                shorter_ref = result[krotsza_idx + 1]
+                try:
+                    # Cut at the inline shorter-pericope end marker
+                    body_end = result.index("Koniec krótszej perykopy.", krotsza_idx)
+                    rebuilt = (
+                        ["DRUGIE CZYTANIE", shorter_ref]
+                        + result[krotsza_idx + 2:body_end]
+                        + ["Oto słowo Boże."]
+                    )
+                except ValueError:
+                    # No inline marker — fall back to the full (longer) text
+                    rebuilt = (
+                        ["DRUGIE CZYTANIE", result[longer_idx + 1]]
+                        + result[krotsza_idx + 2:reading_end]
+                        + ["Oto słowo Boże."]
+                    )
+                result[longer_idx:reading_end + 1] = rebuilt
+                logger.debug("Collapsed combined longer/shorter Second Reading header")
+    except ValueError:
+        pass
+
     # Handle longer/shorter Second Reading versions (Easter Vigil) - prefer shorter
     try:
         if "DRUGIE CZYTANIE DŁUŻSZE" in result and "DRUGIE CZYTANIE KRÓTSZE" in result:
