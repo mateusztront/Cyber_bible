@@ -5,9 +5,8 @@ Handles drawing biblical text on images with justified alignment and pagination.
 
 import copy
 import logging
-import textwrap
 from enum import Enum
-from typing import Dict, List, Optional, Any
+from typing import Any, Callable, Dict, List, Optional
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -75,6 +74,58 @@ def _calculate_layout(font_size: int) -> Dict[str, int]:
     }
 
 
+# Opening quotes/brackets ignored when deciding whether a word is one letter long
+_OPENING_PUNCTUATION = "„\"'«‹([{"
+
+
+def _must_not_end_line(word: str) -> bool:
+    """
+    True for words that Polish typography keeps off the end of a line:
+    one-letter words ("i", "w", "z", "a", "o", "u", "„A") and tokens made only
+    of punctuation (":", "–", "—").
+    """
+    if not any(c.isalnum() for c in word):
+        return True
+    core = word.lstrip(_OPENING_PUNCTUATION)
+    return len(core) == 1 and core.isalpha()
+
+
+def wrap_words(text: str, fits: Callable[[str, int], bool]) -> List[str]:
+    """
+    Greedy word-wrap that never leaves a one-letter word or a lone punctuation
+    token at the end of a line — such words are carried over to the next line.
+
+    Args:
+        text: Text to wrap
+        fits: fits(candidate_line, line_index) -> whether the line fits
+
+    Returns:
+        List of lines
+    """
+    lines: List[str] = []
+    current: List[str] = []
+    for word in text.split():
+        if not current or fits(" ".join(current + [word]), len(lines)):
+            current.append(word)
+            continue
+        carried: List[str] = []
+        while len(current) > 1 and _must_not_end_line(current[-1]):
+            carried.insert(0, current.pop())
+        lines.append(" ".join(current))
+        current = carried + [word]
+    if current:
+        lines.append(" ".join(current))
+    return lines
+
+
+def wrap_text(text: str, width: int, first_line_indent: int = 0) -> List[str]:
+    """Character-count wrap (textwrap.wrap replacement) using wrap_words rules."""
+    return wrap_words(
+        text,
+        lambda line, index: len(line) + (first_line_indent if index == 0 else 0) <= width,
+    )
+
+
 def _wrap_to_pixel_width(
     draw: ImageDraw.Draw,
     text: str,
@@ -82,27 +133,14 @@ def _wrap_to_pixel_width(
     max_width: float,
 ) -> List[str]:
     """
-    Greedy word-wrap that measures each line in real glyph pixels.
+    Word-wrap that measures each line in real glyph pixels.
 
-    textwrap.wrap counts characters and is calibrated for the regular font, so
-    bold text (which is ~10% wider per glyph) overshoots the right edge when
-    wrapped that way. This helper guarantees every returned line renders within
-    max_width pixels in the supplied font.
+    Character-count wrapping is calibrated for the regular font, so bold text
+    (which is ~10% wider per glyph) overshoots the right edge when wrapped that
+    way. This helper keeps every returned line within max_width pixels in the
+    supplied font.
     """
-    words = text.split()
-    if not words:
-        return []
-    lines: List[str] = []
-    current = words[0]
-    for word in words[1:]:
-        candidate = f"{current} {word}"
-        if draw.textlength(candidate, font=font) <= max_width:
-            current = candidate
-        else:
-            lines.append(current)
-            current = word
-    lines.append(current)
-    return lines
+    return wrap_words(text, lambda line, _: draw.textlength(line, font=font) <= max_width)
 
 
 def _fit_reference_font(
@@ -162,11 +200,10 @@ def _draw_justified_paragraph(
     width = layout["width"]
 
     for paragraph in paragraphs:
-        lines = textwrap.wrap(paragraph, width=width, initial_indent="     ")
+        lines = wrap_text(paragraph, width, first_line_indent=5)
         if not lines:
             continue
 
-        lines[0] = lines[0].strip()
         space_length_regular = 15
 
         for line_count, line in enumerate(lines):
@@ -413,18 +450,7 @@ def _same_refrain(a: str, b: str) -> bool:
 
 def _wrap_to_width(draw, text: str, font, max_width: float) -> List[str]:
     """Split text into lines that each fit within max_width pixels."""
-    lines = []
-    current = ""
-    for word in text.split():
-        candidate = f"{current} {word}".strip()
-        if current and draw.textlength(candidate, font=font) > max_width:
-            lines.append(current)
-            current = word
-        else:
-            current = candidate
-    if current:
-        lines.append(current)
-    return lines or [text]
+    return _wrap_to_pixel_width(draw, text, font, max_width) or [text]
 
 
 def draw_psalm(
