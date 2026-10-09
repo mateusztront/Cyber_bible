@@ -31,6 +31,7 @@ from config import (
     MAX_CAROUSEL_IMAGES,
     EASTER_VIGIL_OT_READING_INDICES,
     PASSION_SPLIT_THRESHOLD,
+    PASSION_MIN_BODY_CHARS,
 )
 from draw_posts import (
     draw_text,
@@ -38,6 +39,7 @@ from draw_posts import (
     draw_text_pagination_middle,
     draw_text_pagination_second,
     draw_psalm,
+    wrap_text,
 )
 from login import login_user
 from midjourney_wrapper import MidjourneyWrapper
@@ -107,6 +109,29 @@ _GOSPEL_VARIANT_RE = re.compile(
 )
 
 
+def _extract_vigil_page_nums(idx_div) -> set:
+    """Extract sub-page numbers from a content_index div, but only when its
+    links are reading names (Easter Vigil: "TRZECIE CZYTANIE",
+    "EWANGELIA W ROKU A", ...) — those are parts of a single liturgy that must
+    be combined. Links naming whole formularies ("Czytania mszalne z dnia" /
+    "wigilii", "Msza w nocy", video versions) are alternative Masses; the base
+    page already holds the first (day) set, so no pages are returned for them.
+    """
+    reading_markers = ("CZYTANIE", "PSALM", "EWANGELIA")
+    page_nums = set()
+    for a in idx_div.find_all("a", href=True):
+        text = a.get_text().upper()
+        # Skip old lectionary link
+        if "STAREGO" in text:
+            continue
+        if not any(marker in text for marker in reading_markers):
+            continue
+        match = re.search(r"/(\d+)#", a["href"])
+        if match:
+            page_nums.add(int(match.group(1)))
+    return page_nums
+
+
 def _scrape_content_list(thedate: str) -> List[str]:
     """Fetch raw content list for a given date, handling paginated vigil pages."""
     url = f"{LITURGY_URL_PL}/{thedate}"
@@ -122,15 +147,7 @@ def _scrape_content_list(thedate: str) -> List[str]:
     # Check for vigil pagination (content_index div with sub-page links)
     idx_div = soup.find("div", "content_index")
     if idx_div:
-        links = idx_div.find_all("a", href=True)
-        page_nums = set()
-        for a in links:
-            # Skip old lectionary link
-            if "STAREGO" in a.get_text().upper():
-                continue
-            match = re.search(r"/(\d+)#", a["href"])
-            if match:
-                page_nums.add(int(match.group(1)))
+        page_nums = _extract_vigil_page_nums(idx_div)
 
         if len(page_nums) > 1:
             logger.info(f"Vigil pagination detected: {len(page_nums)} sub-pages")
@@ -217,8 +234,73 @@ def _normalize_vigil_markers(content_list: List[str], thedate: str) -> List[str]
     return result
 
 
+def _mark_psalm_stanza_refrains(content_list: List[str]) -> List[str]:
+    """
+    Convert the source's blank-line stanza breaks inside psalm sections into
+    "Refren" markers, and close the last stanza with one — refrain placement
+    then follows the actual stanza structure instead of assumed stanza
+    lengths. Must run before blank lines are discarded. Psalms without
+    blank-line breaks are left unchanged; _add_psalm_refrains falls back to
+    fixed positions for those.
+    """
+    out: List[str] = []
+    i = 0
+    n = len(content_list)
+    while i < n:
+        if not content_list[i].strip().endswith("PSALM RESPONSORYJNY"):
+            out.append(content_list[i])
+            i += 1
+            continue
+
+        # Section runs until the next all-caps header (DRUGIE CZYTANIE,
+        # ŚPIEW PRZED EWANGELIĄ, a numbered vigil psalm, ...)
+        end = n
+        for k in range(i + 1, n):
+            s = content_list[k].strip()
+            if s and s == s.upper() and any(c.isalpha() for c in s):
+                end = k
+                break
+
+        # Split the section body into blank-separated blocks
+        blocks: List[List[str]] = []
+        current: List[str] = []
+        for line in content_list[i + 1 : end]:
+            if line.strip():
+                current.append(line)
+            elif current:
+                blocks.append(current)
+                current = []
+        if current:
+            blocks.append(current)
+
+        # Header block = reference + refrain line(s); numbered alternative
+        # refrains directly after a bare "Refren:" belong to it as well
+        while (
+            len(blocks) > 1
+            and any(b.strip().startswith("Refren") for b in blocks[0])
+            and all(_ALT_REFRAIN_RE.match(b.strip()) for b in blocks[1])
+        ):
+            blocks[0] += blocks.pop(1)
+
+        has_refrain_header = blocks and any(
+            b.strip().startswith("Refren") for b in blocks[0]
+        )
+        if has_refrain_header and len(blocks) >= 3:
+            out.append(content_list[i])
+            out.extend(blocks[0])
+            for stanza in blocks[1:]:
+                out.extend(stanza)
+                out.append("Refren")
+        else:
+            out.extend(content_list[i:end])
+        i = end
+    return out
+
+
 def _clean_content_list(content_list: List[str]) -> List[str]:
     """Clean and normalize the scraped content list."""
+    content_list = _mark_psalm_stanza_refrains(content_list)
+
     # Remove empty trailing elements
     while content_list and content_list[-1] == "":
         content_list.pop()
@@ -283,6 +365,40 @@ def _clean_content_list(content_list: List[str]) -> List[str]:
 def _normalize_readings(content_list: List[str]) -> List[str]:
     """Normalize reading names and handle shorter/longer versions."""
     result = content_list.copy()
+
+    # Handle combined longer/shorter Gospel format - prefer shorter.
+    # Some pages publish ONE Gospel text with both references stacked in the header
+    # and an inline end marker instead of two separate sections:
+    #   EWANGELIA DŁUŻSZA / <longer ref> / KRÓTSZA / <shorter ref> / [subtitle] /
+    #   Słowa Ewangelii... / text... / Koniec krótszej perykopy. / text... /
+    #   Oto słowo Pańskie.
+    # Rebuild it as a standard EWANGELIA section ending at the inline marker.
+    try:
+        if "EWANGELIA DŁUŻSZA" in result and "EWANGELIA KRÓTSZA" not in result:
+            longer_idx = result.index("EWANGELIA DŁUŻSZA")
+            krotsza_idx = result.index("KRÓTSZA", longer_idx)
+            gospel_end = result.index("Oto słowo Pańskie.", krotsza_idx)
+            if krotsza_idx - longer_idx <= 3:
+                shorter_ref = result[krotsza_idx + 1]
+                try:
+                    # Cut at the inline shorter-pericope end marker
+                    body_end = result.index("Koniec krótszej perykopy.", krotsza_idx)
+                    rebuilt = (
+                        ["EWANGELIA", shorter_ref]
+                        + result[krotsza_idx + 2:body_end]
+                        + ["Oto słowo Pańskie."]
+                    )
+                except ValueError:
+                    # No inline marker — fall back to the full (longer) text
+                    rebuilt = (
+                        ["EWANGELIA", result[longer_idx + 1]]
+                        + result[krotsza_idx + 2:gospel_end]
+                        + ["Oto słowo Pańskie."]
+                    )
+                result[longer_idx:gospel_end + 1] = rebuilt
+                logger.debug("Collapsed combined longer/shorter Gospel header")
+    except ValueError:
+        pass
 
     # Handle longer/shorter Gospel versions FIRST - prefer shorter, preserve subtitle
     # Must run before replacements that change marker names
@@ -694,6 +810,24 @@ def _normalize_passion_gospel_header(content_dic: Dict[str, List[str]]) -> None:
         content_dic["EWANGELIA"] = [gospel[0], ""] + [passion_title] + gospel[2:]
 
 
+def _is_passion_gospel(content_dic: Dict[str, List[str]]) -> bool:
+    """
+    Detect a Passion Gospel (Palm Sunday / Good Friday) by Gospel length.
+
+    Requires BOTH many body paragraphs AND a large amount of body text.
+    The character check guards against normal Gospels made of many short
+    poetic lines (e.g. the Magnificat: 21 paragraphs, ~1300 chars), while
+    real Passions run 8000+ chars even in the shorter form.
+    Body = everything except 3 header items and 1 closing line.
+    """
+    gospel = content_dic.get("EWANGELIA", [])
+    body = gospel[3:-1] if len(gospel) > 4 else []
+    return (
+        len(body) > PASSION_SPLIT_THRESHOLD * 3
+        and sum(len(line) for line in body) >= PASSION_MIN_BODY_CHARS
+    )
+
+
 def _ensure_gospel_subtitle_slot(content_dic: Dict[str, List[str]]) -> None:
     """
     Some Gospel readings lack a thematic subtitle — the formula
@@ -876,7 +1010,7 @@ def _generate_reading_images(
             # Single page - use optimal font calculated by pagination
             result = draw_text(content_dic, background, reading_name, optimal_font)
 
-            # The estimator can be optimistic (it counts characters via textwrap,
+            # The estimator can be optimistic (it counts characters via wrap_text,
             # not real glyph widths). Verify the rendered text actually fits and
             # shrink the font if the closing line would clip the bottom edge.
             while not _text_fits(result["drawn_y"], optimal_font) and optimal_font > FONT_SIZE_MIN:
@@ -975,7 +1109,6 @@ def _estimate_text_height(content: List[str], font_size: int, is_first_page: boo
     Returns:
         Estimated pixel height
     """
-    import textwrap
 
     line_height = int(1.2 * font_size)
     # Based on _calculate_layout() in draw_posts.py, minus safety margin
@@ -997,7 +1130,7 @@ def _estimate_text_height(content: List[str], font_size: int, is_first_page: boo
         intro = content[2] if len(content) > 2 else ""
         if intro:
             bold_width = max(int(width * 0.9), 1)
-            total_lines += max(len(textwrap.wrap(intro, width=bold_width)), 1)
+            total_lines += max(len(wrap_text(intro, bold_width)), 1)
         # Gap between header and body
         total_lines += 1
         body_start = 3
@@ -1005,7 +1138,7 @@ def _estimate_text_height(content: List[str], font_size: int, is_first_page: boo
         body_start = 0
 
     for paragraph in content[body_start:]:
-        wrapped = textwrap.wrap(paragraph, width=width)
+        wrapped = wrap_text(paragraph, width)
         total_lines += max(len(wrapped), 1)
 
     return total_lines * line_height + (font_size * 2)  # Safe margin
@@ -1082,7 +1215,6 @@ def _calculate_optimal_pagination(
             return 1, test_font, [content]
 
     # --- multi-page: greedy packing, prefer fewest pages then largest font ---
-    import textwrap
 
     best_num = max_pages + 1
     best_font = FONT_SIZE_MIN - 1
@@ -1092,7 +1224,7 @@ def _calculate_optimal_pagination(
         line_height = int(1.2 * test_font)
         size_x_left = int(25 / 12 * test_font)
         width = int(75 - 0.325 * size_x_left) - 3
-        para_lines = [max(len(textwrap.wrap(p, width=width)), 1) for p in body_content]
+        para_lines = [max(len(wrap_text(p, width)), 1) for p in body_content]
 
         # Header height for first page
         header_lines = 1
@@ -1100,7 +1232,7 @@ def _calculate_optimal_pagination(
             header_lines += 1
         if len(content) > 2 and content[2]:
             bold_width = max(int(width * 0.9), 1)
-            header_lines += max(len(textwrap.wrap(content[2], width=bold_width)), 1)
+            header_lines += max(len(wrap_text(content[2], bold_width)), 1)
         header_lines += 1  # gap
         margin = test_font * 2
         max_lines = (max_height - margin) // line_height
@@ -1334,10 +1466,7 @@ def draw_post(thedate: str, verse_break: int = 0) -> List[str]:
     _ensure_gospel_subtitle_slot(content_dic)
     _normalize_passion_gospel_header(content_dic)
     # Detect Passion Gospel (Palm Sunday / Good Friday) — very long Gospel
-    # Count body paragraphs only (exclude 3 header items + 1 closing) to avoid
-    # false positives on normal-length Gospels with many short paragraphs
-    gospel_body_count = max(len(content_dic.get("EWANGELIA", [])) - 4, 0)
-    is_passion = gospel_body_count > PASSION_SPLIT_THRESHOLD * 3
+    is_passion = _is_passion_gospel(content_dic)
     # Split overlong body paragraphs (any reading) so the paginator can place
     # them without overflowing — needed for long Pauline speeches as well as
     # Passion Gospels.

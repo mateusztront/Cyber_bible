@@ -18,6 +18,7 @@ from config import (
     FONT_BOLD,
     FONT_FALLBACK_REGULAR,
     FONT_FALLBACK_BOLD,
+    COLOR_TITLE,
 )
 
 logger = logging.getLogger(__name__)
@@ -281,12 +282,12 @@ def draw_text(
 
     # Draw title and reference (shrink reference font if it would overlap the title)
     ref_font = _fit_reference_font(draw, name, content_dic[name][0], fnt_b, font_size, size_x_right)
-    draw.text((size_x_left, size_x_left), name, font=fnt_b, fill="red", anchor="lm")
+    draw.text((size_x_left, size_x_left), name, font=fnt_b, fill=COLOR_TITLE, anchor="lm")
     draw.text(
         (size_x_right + size_x_left, size_x_left),
         content_dic[name][0],
         font=ref_font,
-        fill="red",
+        fill=COLOR_TITLE,
         anchor="rm",
     )
 
@@ -356,12 +357,12 @@ def draw_text_page(
     if page_type == PageType.FIRST:
         # Draw title and reference (shrink reference font if it would overlap the title)
         ref_font = _fit_reference_font(draw, reading_list[0], reading_list[1], fnt_b, font_size, size_x_right)
-        draw.text((size_x_left, size_x_left), reading_list[0], font=fnt_b, fill="red", anchor="lm")
+        draw.text((size_x_left, size_x_left), reading_list[0], font=fnt_b, fill=COLOR_TITLE, anchor="lm")
         draw.text(
             (size_x_right + size_x_left, size_x_left),
             reading_list[1],
             font=ref_font,
-            fill="red",
+            fill=COLOR_TITLE,
             anchor="rm",
         )
 
@@ -503,14 +504,14 @@ def draw_psalm(
         (x_distance, y_further_distance * 2),
         f"{num_space}PSALM RESPONSORYJNY",
         font=fnt_b_psalm,
-        fill="red",
+        fill=COLOR_TITLE,
         anchor="lm",
     )
     draw.text(
         (RIGHT_MARGIN_X, y_further_distance * 2),
         content_dic[psalm_key][0],
         font=fnt_b_psalm,
-        fill="red",
+        fill=COLOR_TITLE,
         anchor="rm",
     )
 
@@ -519,7 +520,7 @@ def draw_psalm(
         (x_distance, y_further_distance * 4),
         "Refren: ",
         font=fnt_b_psalm,
-        fill="red",
+        fill=COLOR_TITLE,
         anchor="lm",
     )
     refrain_text = content_dic[psalm_key][1][7:] if content_dic[psalm_key][1].startswith("Refren") else content_dic[psalm_key][1]
@@ -537,7 +538,7 @@ def draw_psalm(
     for count, element in enumerate(content_dic[psalm_key][2:]):
         if "Refren" in element:
             refrain_y = y_text + refrain_gap
-            draw.text((x_distance, refrain_y), "Refren: ", font=fnt_b_psalm, fill="red", anchor="lm")
+            draw.text((x_distance, refrain_y), "Refren: ", font=fnt_b_psalm, fill=COLOR_TITLE, anchor="lm")
             draw.text(
                 (x_distance * 3, refrain_y),
                 refrain_text,
@@ -563,7 +564,7 @@ def draw_psalm(
                 (x_distance, y_text),
                 "AKLAMACJA PRZED EWANGELIĄ",
                 font=fnt_b_psalm,
-                fill="red",
+                fill=COLOR_TITLE,
                 anchor="lm",
             )
             if len(acclamation) > 1:
@@ -571,7 +572,7 @@ def draw_psalm(
                     (RIGHT_MARGIN_X, y_text),
                     acclamation[1],
                     font=fnt_b_psalm,
-                    fill="red",
+                    fill=COLOR_TITLE,
                     anchor="rm",
                 )
 
@@ -581,7 +582,7 @@ def draw_psalm(
                     (x_distance, opening_y),
                     "Aklamacja: ",
                     font=fnt_b_psalm,
-                    fill="red",
+                    fill=COLOR_TITLE,
                     anchor="lm",
                 )
                 draw.text(
@@ -644,7 +645,7 @@ def draw_psalm(
                     (x_distance, closing_y),
                     "Aklamacja: ",
                     font=fnt_b_psalm,
-                    fill="red",
+                    fill=COLOR_TITLE,
                     anchor="lm",
                 )
                 draw.text(

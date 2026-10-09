@@ -17,6 +17,8 @@ from create_graphic import (
     _create_four_page_pagination,
     _estimate_text_height,
     _calculate_optimal_pagination,
+    _extract_vigil_page_nums,
+    _mark_psalm_stanza_refrains,
     MAX_PAGES_PER_READING,
 )
 from draw_posts import _calculate_layout
@@ -111,6 +113,50 @@ class TestNormalizeReadings:
         content = [".PSALM RESPONSORYJNY", "content"]
         result = _normalize_readings(content)
         assert result[0] == "PSALM RESPONSORYJNY"
+
+    def test_combined_longer_shorter_gospel_prefers_shorter(self):
+        # Format seen on 2026-07-12: one Gospel text, stacked references,
+        # inline "Koniec krótszej perykopy." end marker
+        content = [
+            "EWANGELIA DŁUŻSZA",
+            "Mt 13, 1-23",
+            "KRÓTSZA",
+            "Mt 13, 1-9",
+            "Przypowieść o siewcy",
+            "Słowa Ewangelii według Świętego Mateusza",
+            "Owego dnia Jezus wyszedł z domu i usiadł nad jeziorem.",
+            "«Oto siewca wyszedł siać».",
+            "Koniec krótszej perykopy.",
+            "Przystąpili do Niego uczniowie i zapytali.",
+            "Oto słowo Pańskie.",
+        ]
+        result = _normalize_readings(content)
+        assert result[0] == "EWANGELIA"
+        assert result[1] == "Mt 13, 1-9"
+        assert result[2] == "Przypowieść o siewcy"
+        assert "Koniec krótszej perykopy." not in result
+        assert "Przystąpili do Niego uczniowie i zapytali." not in result
+        assert result[-1] == "Oto słowo Pańskie."
+        assert "DŁUŻSZA" not in str(result)
+        assert "KRÓTSZA" not in str(result)
+
+    def test_combined_gospel_without_end_marker_uses_longer(self):
+        content = [
+            "EWANGELIA DŁUŻSZA",
+            "Mt 13, 1-23",
+            "KRÓTSZA",
+            "Mt 13, 1-9",
+            "Przypowieść o siewcy",
+            "Słowa Ewangelii według Świętego Mateusza",
+            "Owego dnia Jezus wyszedł z domu i usiadł nad jeziorem.",
+            "Przystąpili do Niego uczniowie i zapytali.",
+            "Oto słowo Pańskie.",
+        ]
+        result = _normalize_readings(content)
+        assert result[0] == "EWANGELIA"
+        assert result[1] == "Mt 13, 1-23"
+        assert "Przystąpili do Niego uczniowie i zapytali." in result
+        assert result[-1] == "Oto słowo Pańskie."
 
 
 class TestParseReadings:
@@ -352,3 +398,116 @@ class TestGospelPagination:
             content, 44, reading_name="EWANGELIA", max_pages=MAX_PAGES_PER_READING,
         )
         assert num_pages == 1
+
+
+class TestExtractVigilPageNums:
+    """Tests for _extract_vigil_page_nums (content_index sub-page detection)."""
+
+    def _make_idx_div(self, links):
+        from bs4 import BeautifulSoup
+        html = '<div class="content_index">' + "".join(
+            f'<a href="{href}">{text}</a>' for href, text in links
+        ) + "</div>"
+        return BeautifulSoup(html, "html.parser").find("div", "content_index")
+
+    def test_easter_vigil_reading_links_are_combined(self):
+        idx_div = self._make_idx_div([
+            ("/kalendarz/x/2026-04-04/1#Par1", "PIERWSZE CZYTANIE dłuższe"),
+            ("/kalendarz/x/2026-04-04/1#Par3", "1 PSALM RESPONSORYJNY"),
+            ("/kalendarz/x/2026-04-04/3#Par7", "TRZECIE CZYTANIE"),
+            ("/kalendarz/x/2026-04-04/8#Par17", "ÓSME CZYTANIE (EPISTOŁA)"),
+            ("/kalendarz/x/2026-04-04/9#Par19", "EWANGELIA W ROKU A"),
+            ("/kalendarz/x/2026-04-04/10#Par22", "LITURGIA SŁOWA WG STAREGO LEKCJONARZA"),
+        ])
+        assert _extract_vigil_page_nums(idx_div) == {1, 3, 8, 9}
+
+    def test_assumption_alternative_masses_not_combined(self):
+        # Aug 15: day Mass + vigil Mass + video pages are alternatives, not parts
+        idx_div = self._make_idx_div([
+            ("/kalendarz/x/2026-08-15/1#Par1", "Czytania mszalne z dnia"),
+            ("/kalendarz/x/2026-08-15/2#Par2", "Czytania mszalne wigilii"),
+            ("/kalendarz/x/2026-08-15/4#Par3", "Liturgia Słowa z dnia do odsłuchania (wersja wideo)"),
+            ("/kalendarz/x/2026-08-15/5#Par4", "Liturgia Słowa z Mszy wigilii do odsłuchania (wersja wideo)"),
+        ])
+        assert _extract_vigil_page_nums(idx_div) == set()
+
+    def test_christmas_alternative_masses_not_combined(self):
+        idx_div = self._make_idx_div([
+            ("/kalendarz/x/2025-12-25/1#Par1", "Liturgia Słowa wg lekcjonarza z 2015 roku - Msza Wigilii"),
+            ("/kalendarz/x/2025-12-25/3#Par3", "Liturgia Słowa wg lekcjonarza z 2015 roku - Msza w nocy"),
+            ("/kalendarz/x/2025-12-25/7#Par7", "Liturgia Słowa wg lekcjonarza z 2015 roku - Msza w dzień"),
+            ("/kalendarz/x/2025-12-25/9#Par9", "Liturgia Słowa według starego lekcjonarza"),
+        ])
+        assert _extract_vigil_page_nums(idx_div) == set()
+
+
+class TestMarkPsalmStanzaRefrains:
+    """Tests for _mark_psalm_stanza_refrains (stanza breaks → Refren markers)."""
+
+    def _psalm_section(self):
+        return [
+            "PSALM RESPONSORYJNY",
+            "Ps 45,7.10-12.14-15",
+            "Refren: Stoi Królowa po Twojej prawicy.",
+            "",
+            "Tron Twój, Boże, trwa na wieki,",
+            "berłem sprawiedliwym berło Twego królestwa.",
+            "",
+            "Posłuchaj, córko, spójrz i nakłoń ucha,",
+            "zapomnij o swym ludzie, o domu twego ojca.",
+            "",
+            "Córa królewska wchodzi pełna chwały,",
+            "odziana w złotogłów.",
+        ]
+
+    def test_inserts_refren_at_each_stanza_break(self):
+        result = _mark_psalm_stanza_refrains(self._psalm_section() + ["DRUGIE CZYTANIE", "1 Kor 15,20-26"])
+        psalm_part = result[: result.index("DRUGIE CZYTANIE")]
+        assert psalm_part.count("Refren") == 3
+
+    def test_refren_closes_last_stanza(self):
+        result = _mark_psalm_stanza_refrains(self._psalm_section() + ["EWANGELIA", "Łk 1,39-56"])
+        psalm_part = result[: result.index("EWANGELIA")]
+        assert psalm_part[-1] == "Refren"
+
+    def test_no_refren_between_header_and_first_stanza(self):
+        result = _mark_psalm_stanza_refrains(self._psalm_section() + ["EWANGELIA"])
+        refrain_header_idx = next(i for i, l in enumerate(result) if l.startswith("Refren:"))
+        assert result[refrain_header_idx + 1] == "Tron Twój, Boże, trwa na wieki,"
+
+    def test_psalm_without_blank_breaks_unchanged(self):
+        content = [
+            "PSALM RESPONSORYJNY",
+            "Ps 23",
+            "Refren: Pan mym pasterzem.",
+            "Wers 1.",
+            "Wers 2.",
+            "EWANGELIA",
+        ]
+        assert _mark_psalm_stanza_refrains(content) == content
+
+    def test_numbered_alternative_refrains_stay_with_header(self):
+        content = [
+            "PSALM RESPONSORYJNY",
+            "Ps 46",
+            "Refren:",
+            "",
+            "1. Kościół nie zginie, Bóg jest w jego wnętrzu.",
+            "2. Tyś wielką chlubą Kościoła świętego.",
+            "",
+            "Wers pierwszej strofy.",
+            "Wers drugi.",
+            "",
+            "Wers trzeciej strofy.",
+            "Wers czwarty.",
+            "EWANGELIA",
+        ]
+        result = _mark_psalm_stanza_refrains(content)
+        alt_idx = result.index("1. Kościół nie zginie, Bóg jest w jego wnętrzu.")
+        assert result[alt_idx + 1] == "2. Tyś wielką chlubą Kościoła świętego."
+        psalm_part = result[: result.index("EWANGELIA")]
+        assert psalm_part.count("Refren") == 2
+
+    def test_non_psalm_content_untouched(self):
+        content = ["PIERWSZE CZYTANIE", "Ref", "Treść.", "", "Dalsza treść.", "EWANGELIA"]
+        assert _mark_psalm_stanza_refrains(content) == content

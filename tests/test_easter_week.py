@@ -179,9 +179,15 @@ def vigil_content_list():
 @pytest.fixture
 def passion_content_dict():
     """Content dict simulating a long Passion Gospel (Palm Sunday / Good Friday)."""
+    passion_para = (
+        "Jeden z Dwunastu, imieniem Judasz Iskariota, udał się do arcykapłanów "
+        "i rzekł: Co chcecie mi dać, a ja wam Go wydam? A oni wyznaczyli mu "
+        "trzydzieści srebrników. Odtąd szukał sposobności, żeby Go wydać. "
+        "W pierwszy dzień Przaśników przystąpili do Jezusa uczniowie. "
+    )
     long_gospel = (
         ["Mt 26, 14-27, 66", "Słowa Ewangelii według Świętego Mateusza", "Jezus rzekł do uczniów:"]
-        + [f"Werset pasyjny {i}." for i in range(20)]
+        + [f"{passion_para} (werset {i})" for i in range(30)]
         + ["Oto słowo Pańskie."]
     )
     return {
@@ -533,29 +539,35 @@ class TestTruncateReadingsVigil:
 class TestPassionDetection:
 
     def test_long_gospel_detected_as_passion(self, passion_content_dict):
-        from config import PASSION_SPLIT_THRESHOLD
-        # Body paragraphs only (exclude 3 header items + 1 closing)
-        gospel_body = len(passion_content_dict["EWANGELIA"]) - 4
-        assert gospel_body > PASSION_SPLIT_THRESHOLD * 3, \
+        from create_graphic import _is_passion_gospel
+        assert _is_passion_gospel(passion_content_dict), \
             "Fixture gospel should be long enough to trigger passion detection"
 
     def test_short_gospel_not_detected_as_passion(self):
-        from config import PASSION_SPLIT_THRESHOLD
+        from create_graphic import _is_passion_gospel
         short_gospel = ["J 20, 1-9", "Słowa Ewangelii", "Intro.", "Treść.", "Oto słowo Pańskie."]
-        # Body paragraphs only (exclude 3 header items + 1 closing)
-        body_count = max(len(short_gospel) - 4, 0)
-        assert body_count <= PASSION_SPLIT_THRESHOLD * 3
+        assert not _is_passion_gospel({"EWANGELIA": short_gospel})
 
     def test_medium_gospel_not_detected_as_passion(self):
         """A gospel with ~9 body paragraphs (like J 20, 11-18) should not be passion."""
-        from config import PASSION_SPLIT_THRESHOLD
+        from create_graphic import _is_passion_gospel
         medium_gospel = (
             ["J 20, 11-18", "Subtitle", "Intro bold"]
             + [f"Paragraph {i}." for i in range(9)]
             + ["Oto słowo Pańskie."]
         )
-        body_count = max(len(medium_gospel) - 4, 0)
-        assert body_count <= PASSION_SPLIT_THRESHOLD * 3
+        assert not _is_passion_gospel({"EWANGELIA": medium_gospel})
+
+    def test_many_short_poetic_lines_not_detected_as_passion(self):
+        """Magnificat-style Gospel (Aug 15): many short lines but little text."""
+        from create_graphic import _is_passion_gospel
+        magnificat_gospel = (
+            ["Łk 1,39-56", "Bóg wywyższa pokornych", "Słowa Ewangelii według świętego Łukasza"]
+            + ["W tym czasie Maryja wybrała się i poszła z pośpiechem w góry."]
+            + [f"Wielbi dusza moja Pana, wers {i}." for i in range(18)]
+            + ["Oto słowo Pańskie"]
+        )
+        assert not _is_passion_gospel({"EWANGELIA": magnificat_gospel})
 
     def test_passion_header_normalization_accusative(self):
         """Accusative form 'Mękę...' is converted to nominative and moved to bold-intro slot."""

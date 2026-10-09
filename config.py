@@ -53,7 +53,8 @@ TEXT_PADDING_TOP = 75
 LINE_HEIGHT_MULTIPLIER = 1.2
 
 # Colors (RGB)
-COLOR_TITLE = (139, 0, 0)  # Dark red for titles
+# COLOR_TITLE = "red"  # Old title red (pure 255, 0, 0) - uncomment to revert
+COLOR_TITLE = (155, 22, 18)  # Dark brick red for titles/refrains (matches 2026-10-04 reference)
 COLOR_TEXT = (0, 0, 0)  # Black for body text
 COLOR_REFERENCE = (100, 100, 100)  # Gray for references
 
@@ -123,6 +124,12 @@ EASTER_VIGIL_OT_READING_INDICES = [0, 2, 4, 6]
 
 # If EWANGELIA has more paragraphs than this threshold × 3, it's a Passion Gospel → allow extended pagination
 PASSION_SPLIT_THRESHOLD = 4
+
+# A Passion Gospel must also have at least this many characters of body text.
+# Guards against normal Gospels made of many short poetic lines (e.g. the
+# Magnificat on Aug 15: 21 paragraphs but only ~1300 chars; real Passions run
+# 8000+ even in the shorter form).
+PASSION_MIN_BODY_CHARS = 4000
 
 # =============================================================================
 # MIDJOURNEY API (Discord-based, unofficial)
