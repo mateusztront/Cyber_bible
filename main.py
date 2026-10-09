@@ -8,7 +8,7 @@ import sys
 
 import eel
 
-from config import WEB_DIR, LOG_LEVEL, LOG_FORMAT
+from config import WEB_DIR, LOG_LEVEL, LOG_FORMAT, HEADLESS
 
 # Configure logging
 logging.basicConfig(
@@ -40,7 +40,8 @@ def main():
     eel.start(
         "index.html",
         size=(800, 800),
-        mode="default",
+        mode=None if HEADLESS else "default",
+        host="0.0.0.0" if HEADLESS else "localhost",
         port=8000,
     )
 

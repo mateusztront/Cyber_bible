@@ -100,6 +100,15 @@ DEFAULT_HASHTAGS = [
 ]
 
 # =============================================================================
+# SERVER MODE
+# =============================================================================
+
+# Headless mode: serve the app on the network (no desktop window) so it can be
+# opened from other devices, e.g. a phone via Tailscale. Enable with HEADLESS=1
+# in .env, or pass --headless on the command line.
+HEADLESS = os.getenv("HEADLESS", "0").lower() in ("1", "true", "yes")
+
+# =============================================================================
 # LOGGING
 # =============================================================================
 
