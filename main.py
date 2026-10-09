@@ -37,11 +37,24 @@ def main():
     logger.info("Starting Cyber Bible application")
     logger.info(f"Web directory: {WEB_DIR}")
 
+    def on_page_closed(page, sockets):
+        logger.info(f"Page {page} disconnected ({len(sockets)} still connected) - keeping server running")
+
+    if HEADLESS:
+        mode=None
+        host="0.0.0.0"
+        close_callback=on_page_closed
+    else:
+        mode="default"
+        host="localhost"
+        close_callback=None
+
     eel.start(
         "index.html",
         size=(800, 800),
-        mode=None if HEADLESS else "default",
-        host="0.0.0.0" if HEADLESS else "localhost",
+        mode=mode,
+        host=host,
+        close_callback=close_callback,
         port=8000,
     )
 
