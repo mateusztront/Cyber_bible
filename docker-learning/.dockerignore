@@ -1,0 +1,4 @@
+# Files NOT to copy into the image (keeps it small & clean).
+__pycache__/
+*.pyc
+.venv/
