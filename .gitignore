@@ -26,3 +26,4 @@ web/20*/
 # OS files
 .DS_Store
 Thumbs.db
+assets/fonts/
