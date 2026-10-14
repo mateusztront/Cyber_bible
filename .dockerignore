@@ -1,0 +1,22 @@
+# Files NOT copied into the image.
+
+# Secrets: passed in at run time, never baked into the image.
+.env
+session.json
+
+# Microsoft-licensed fonts: mounted at run time, never baked into the image.
+assets/fonts/
+
+# Generated posts (mounted via web/ at run time).
+web/20*/
+
+# Local-only stuff.
+.git/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+.claude/
+tests/
+docker-learning/

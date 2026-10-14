@@ -1,0 +1,13 @@
+# `docker compose up --build` = build the image and run it with everything below,
+# instead of typing one long `docker run` command.
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"           # your machine : container
+    env_file: .env            # Instagram login etc., read at start, not in the image
+    volumes:
+      - ./assets/fonts:/app/assets/fonts:ro   # Tahoma, read-only
+      - ./session.json:/app/session.json      # Instagram session survives restarts
+      - ./web:/app/web                        # generated posts land in your web/ folder
+    restart: unless-stopped   # come back after a crash or reboot
