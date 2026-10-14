@@ -511,3 +511,59 @@ class TestMarkPsalmStanzaRefrains:
     def test_non_psalm_content_untouched(self):
         content = ["PIERWSZE CZYTANIE", "Ref", "Treść.", "", "Dalsza treść.", "EWANGELIA"]
         assert _mark_psalm_stanza_refrains(content) == content
+
+
+class TestPublishReplyParsing:
+    """publish() must not report failure when the post went live but instagrapi
+    could not parse Instagram's reply (account_badges ints, Oct 2026)."""
+
+    @staticmethod
+    def _validation_error():
+        from pydantic import BaseModel
+
+        class Badged(BaseModel):
+            account_badges: list[dict]
+
+        try:
+            Badged(account_badges=[0])
+        except Exception as e:
+            return e
+
+    @staticmethod
+    def _client(tmp_path, last_json, error):
+        from unittest.mock import MagicMock
+        from PIL import Image
+
+        post_dir = tmp_path / "2026-10-14"
+        post_dir.mkdir()
+        Image.new("RGB", (100, 100), "white").save(post_dir / "cover.jpg")
+        (post_dir / "EWANGELIA.jpg").write_bytes(b"fake")
+
+        client = MagicMock()
+        client.album_upload.side_effect = error
+        client.last_json = last_json
+        return client
+
+    def test_reply_parse_error_after_success_is_success(self, tmp_path):
+        from unittest.mock import patch
+        from create_graphic import publish
+
+        client = self._client(tmp_path, {"status": "ok", "media": {"pk": "1"}}, self._validation_error())
+        with patch("create_graphic.login_user", return_value=client), patch("create_graphic.WEB_DIR", tmp_path):
+            assert publish("2026-10-14", "caption") == ""
+
+    def test_reply_parse_error_without_ok_status_is_failure(self, tmp_path):
+        from unittest.mock import patch
+        from create_graphic import publish
+
+        client = self._client(tmp_path, {"status": "fail"}, self._validation_error())
+        with patch("create_graphic.login_user", return_value=client), patch("create_graphic.WEB_DIR", tmp_path):
+            assert publish("2026-10-14", "caption").startswith("Failed to publish")
+
+    def test_other_errors_still_fail(self, tmp_path):
+        from unittest.mock import patch
+        from create_graphic import publish
+
+        client = self._client(tmp_path, {"status": "ok", "media": {"pk": "1"}}, RuntimeError("network down"))
+        with patch("create_graphic.login_user", return_value=client), patch("create_graphic.WEB_DIR", tmp_path):
+            assert publish("2026-10-14", "caption") == "Failed to publish: network down"

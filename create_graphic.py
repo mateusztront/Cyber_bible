@@ -16,6 +16,7 @@ import eel
 import requests
 from bs4 import BeautifulSoup
 from PIL import Image
+from pydantic import ValidationError
 
 from config import (
     BACKGROUND_IMAGE,
@@ -1786,6 +1787,18 @@ def publish(thedate: str, caption: str) -> str:
             caption=full_caption,
             extra_data=alt_text,
         )
+    except ValidationError as e:
+        # instagrapi validates Instagram's reply only AFTER configure_sidecar has
+        # succeeded, so a schema mismatch (e.g. account_badges sent as ints instead
+        # of dicts) means the post IS live. Reporting failure here led to retries
+        # and duplicate posts.
+        last_json = getattr(client, "last_json", None) or {}
+        if last_json.get("status") == "ok" and last_json.get("media"):
+            logger.warning(f"Published, but instagrapi could not parse Instagram's reply: {e}")
+        else:
+            msg = f"Failed to publish: {e}"
+            logger.error(msg)
+            return msg
     except Exception as e:
         msg = f"Failed to publish: {e}"
         logger.error(msg)
