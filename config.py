@@ -115,6 +115,12 @@ HEADLESS = os.getenv("HEADLESS", "0").lower() in ("1", "true", "yes")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
+# logs/app.log, rotated at 1 MB, 5 old files kept. In Docker this folder is
+# mounted from the host, so the log survives rebuilds (Docker's own log doesn't).
+LOG_DIR = BASE_DIR / "logs"
+LOG_FILE_MAX_BYTES = 1_000_000
+LOG_FILE_BACKUPS = 5
+
 # =============================================================================
 # SESSION
 # =============================================================================

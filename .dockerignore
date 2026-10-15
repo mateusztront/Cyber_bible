@@ -10,6 +10,9 @@ assets/fonts/
 # Generated posts (mounted via web/ at run time).
 web/20*/
 
+# App logs (mounted via logs/ at run time).
+logs/
+
 # Local-only stuff.
 .git/
 .venv/

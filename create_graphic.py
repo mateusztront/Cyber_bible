@@ -4,10 +4,12 @@ Handles scraping liturgical readings, generating images, and publishing to Insta
 """
 
 import itertools
+import json
 import logging
 import math
 import os
 import re
+from datetime import datetime
 from functools import reduce
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -1699,26 +1701,90 @@ Grafika wykonana za pomocą sztucznej inteligencji.
 """
 
 
+# Written into a date folder once its post is live on Instagram, so the same
+# date isn't published twice by accident (e.g. retrying after a lost reply).
+PUBLISHED_MARKER = "_published.json"
+
+# Outcome of each publish request, keyed by the id the browser sends with it:
+# None while running, then "" on success or the error message. A page that lost
+# its connection mid-publish asks for it via get_publish_result().
+_publish_results: Dict[str, Optional[str]] = {}
+
+
 @eel.expose
-def publish(thedate: str, caption: str) -> str:
+def get_published_at(thedate: str) -> str:
+    """When the post for this date was published, or "" if it hasn't been."""
+    marker = WEB_DIR / thedate / PUBLISHED_MARKER
+    if not marker.exists():
+        return ""
+    try:
+        return json.loads(marker.read_text(encoding="utf-8"))["published_at"]
+    except (OSError, ValueError, KeyError):
+        return "an unknown time"
+
+
+@eel.expose
+def get_publish_result(request_id: str) -> Dict[str, str]:
+    """State of a publish request: unknown (never received), running, or done."""
+    if request_id not in _publish_results:
+        return {"state": "unknown"}
+    msg = _publish_results[request_id]
+    if msg is None:
+        return {"state": "running"}
+    return {"state": "done", "message": msg}
+
+
+def _mark_published(working_path: Path, media_code: Optional[str]) -> None:
+    marker = {
+        "published_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "media_code": media_code,
+    }
+    try:
+        (working_path / PUBLISHED_MARKER).write_text(json.dumps(marker), encoding="utf-8")
+    except OSError as e:
+        # The post is live, so this must not turn into a failure.
+        logger.warning(f"Published, but could not write {PUBLISHED_MARKER}: {e}")
+
+
+@eel.expose
+def publish(thedate: str, caption: str, force: bool = False, request_id: str = "") -> str:
     """
     Publish images to Instagram.
 
     Args:
         thedate: Date string for the post
         caption: Custom caption text
+        force: Publish even if this date was already published
+        request_id: Browser-generated id for get_publish_result()
 
     Returns:
         Empty string if successful, error message otherwise
     """
+    logger.info(f"publish({thedate}) called (force={force})")
+    if request_id:
+        _publish_results[request_id] = None
     try:
-        client = login_user()
+        msg = _publish(thedate, caption, force)
     except Exception as e:
-        msg = f"Failed to login to Instagram: {e}"
+        logger.exception("publish() crashed")
+        msg = f"Failed to publish: {e}"
+    if request_id:
+        _publish_results[request_id] = msg
+    return msg
+
+
+def _publish(thedate: str, caption: str, force: bool) -> str:
+    working_path = WEB_DIR / thedate
+    if not working_path.is_dir():
+        msg = f"Nothing to publish for {thedate} — tap Create post first"
         logger.error(msg)
         return msg
 
-    working_path = WEB_DIR / thedate
+    published_at = get_published_at(thedate)
+    if published_at and not force:
+        msg = f"The post for {thedate} was already published at {published_at}"
+        logger.warning(msg)
+        return msg
 
     # Detect Easter week special days
     is_vigil = (working_path / "_order.txt").exists()
@@ -1727,24 +1793,37 @@ def publish(thedate: str, caption: str) -> str:
     # SEKWENCJA is between DRUGIE and EWANGELIA
     reading_prefixes = READING_PREFIXES
     all_images = sorted(f for f in os.listdir(working_path) if f.endswith((".jpg", ".webp", ".png", ".jpeg")))
+    cover_images = [f for f in all_images if not any(p in f for p in reading_prefixes)]
 
-    # Convert cover images to 1080x1080 JPEG (Instagram requires consistent dimensions)
-    cover_files = []
-    for filename in all_images:
-        if not any(p in filename for p in reading_prefixes):
-            src = working_path / filename
-            dst = working_path / "cover.jpg"
-            img = Image.open(src).convert("RGB")
-            img = img.resize((IMAGE_SIZE, IMAGE_SIZE), Image.LANCZOS)
-            img.save(dst, "JPEG", quality=95)
-            if src != dst:
-                src.unlink()
-            cover_files.append(dst)
-
-    if not cover_files:
+    # Check what's on disk before logging in, so these fail in a second
+    if not cover_images:
         msg = f"No cover image found — add a file starting with 'cover' or 'mateusztront' to web/{thedate}/"
         logger.error(msg)
         return msg
+
+    if not is_vigil and len(cover_images) == len(all_images):
+        msg = f"No reading graphics for {thedate} — tap Create post first"
+        logger.error(msg)
+        return msg
+
+    try:
+        client = login_user()
+    except Exception as e:
+        msg = f"Failed to login to Instagram: {e}"
+        logger.error(msg)
+        return msg
+
+    # Convert the cover to 1080x1080 JPEG (Instagram requires consistent dimensions).
+    # Use only the newest cover image: one made after the date was published sits
+    # next to the old cover.jpg, and both would be saved as cover.jpg and posted twice.
+    src = max((working_path / f for f in cover_images), key=lambda p: p.stat().st_mtime)
+    dst = working_path / "cover.jpg"
+    img = Image.open(src).convert("RGB")
+    img = img.resize((IMAGE_SIZE, IMAGE_SIZE), Image.LANCZOS)
+    img.save(dst, "JPEG", quality=95)
+    if src != dst:
+        src.unlink()
+    cover_files = [dst]
 
     if is_vigil:
         # Use the ordering file written by draw_post()
@@ -1759,11 +1838,6 @@ def publish(thedate: str, caption: str) -> str:
             for filename in all_images:
                 if prefix in filename:
                     ordered_files.append(working_path / filename)
-
-    if not ordered_files:
-        msg = "No files found to publish"
-        logger.error(msg)
-        return msg
 
     if len(ordered_files) > MAX_CAROUSEL_IMAGES:
         msg = f"Too many images ({len(ordered_files)}) — Instagram limit is {MAX_CAROUSEL_IMAGES}"
@@ -1782,11 +1856,12 @@ def publish(thedate: str, caption: str) -> str:
 
     logger.info(f"Publishing {len(ordered_files)} images for {thedate}")
     try:
-        client.album_upload(
+        media = client.album_upload(
             paths=[str(p) for p in ordered_files],
             caption=full_caption,
             extra_data=alt_text,
         )
+        media_code = getattr(media, "code", None)
     except ValidationError as e:
         # instagrapi validates Instagram's reply only AFTER configure_sidecar has
         # succeeded, so a schema mismatch (e.g. account_badges sent as ints instead
@@ -1795,6 +1870,7 @@ def publish(thedate: str, caption: str) -> str:
         last_json = getattr(client, "last_json", None) or {}
         if last_json.get("status") == "ok" and last_json.get("media"):
             logger.warning(f"Published, but instagrapi could not parse Instagram's reply: {e}")
+            media_code = last_json["media"].get("code") if isinstance(last_json["media"], dict) else None
         else:
             msg = f"Failed to publish: {e}"
             logger.error(msg)
@@ -1804,6 +1880,7 @@ def publish(thedate: str, caption: str) -> str:
         logger.error(msg)
         return msg
 
+    _mark_published(working_path, media_code)
     logger.info(f"Successfully published post for {thedate}")
     return ""
 

@@ -621,34 +621,79 @@ document.querySelector(".english_readings").onclick = async function() {
 
 
 // Publish button
+function showPublishStatus(message, type) {
+    const status = document.getElementById('publish-status');
+    status.innerHTML = '';
+    const div = document.createElement('div');
+    div.className = `status-message ${type}`;
+    div.textContent = message;
+    status.appendChild(div);
+}
+
+function formatPublishedAt(iso) {
+    const date = new Date(iso);
+    return isNaN(date) ? iso : date.toLocaleString();
+}
+
+// The server keeps publishing when the page loses its connection; ask it how
+// the publish with this id ended (it answers once the publish is done).
+async function waitForPublishResult(requestId) {
+    const deadline = Date.now() + 15 * 60 * 1000;
+    while (Date.now() < deadline) {
+        try {
+            const result = await eel.get_publish_result(requestId)();
+            if (result.state === 'done') return result.message;
+            if (result.state === 'unknown') {
+                return 'The server never got this publish request (or restarted since). ' +
+                    'Tap Publish again; you will be asked first if this date was already posted.';
+            }
+        } catch (error) {
+            // Still offline; the next try reconnects
+        }
+        await new Promise(resolve => setTimeout(resolve, 3000));
+    }
+    throw new Error('No result from the server after 15 minutes. Check Instagram before publishing again.');
+}
+
 document.querySelector(".publish").onclick = async function() {
+    const button = this;
     const thedate = document.getElementById('input_date').value;
     const captionElement = document.getElementById('dynamicTextArea');
     const cap = captionElement ? captionElement.value : '';
 
+    button.disabled = true;
     try {
-        const publish_answer = await eel.publish(thedate, cap)();
-        const ok = !publish_answer;
-
-        const container = document.getElementById('content-container');
-        const newDiv = document.createElement('div');
-        newDiv.style.color = ok ? 'green' : 'red';
-        newDiv.style.whiteSpace = 'pre-wrap';
-        const newContent = document.createTextNode(
-            ok ? 'Published successfully!' : 'Publication failed:\n' + publish_answer
-        );
-        newDiv.appendChild(newContent);
-        container.appendChild(newDiv);
-
-        // Play notification sound
-        if (ok) {
-            playNotificationSound('complete');
-        } else {
-            playNotificationSound('error');
+        // Instagram has no undo, so publishing a date twice needs a yes
+        const publishedAt = await eel.get_published_at(thedate)();
+        const force = Boolean(publishedAt);
+        if (force && !confirm(`The post for ${thedate} was already published (${formatPublishedAt(publishedAt)}).\n\nPublish it again?`)) {
+            showPublishStatus('Not published again.', 'info');
+            return;
         }
+
+        showPublishStatus('Publishing… keep this page open until it finishes.', 'info');
+        const requestId = Date.now().toString(36) + Math.random().toString(36).slice(2);
+        let publish_answer;
+        try {
+            publish_answer = await eel.publish(thedate, cap, force, requestId)();
+        } catch (error) {
+            console.warn('Publish reply lost:', error);
+            showPublishStatus('Connection lost while publishing. Checking the result on the server…', 'warning');
+            publish_answer = await waitForPublishResult(requestId);
+        }
+
+        const ok = !publish_answer;
+        showPublishStatus(
+            ok ? 'Published successfully!' : 'Publication failed:\n' + publish_answer,
+            ok ? 'success' : 'error'
+        );
+        playNotificationSound(ok ? 'complete' : 'error');
     } catch (error) {
         console.error('Error publishing:', error);
-        alert('Error publishing: ' + (error.errorText || error.message || error));
+        showPublishStatus('Error publishing: ' + (error.errorText || error.message || error), 'error');
+        playNotificationSound('error');
+    } finally {
+        button.disabled = false;
     }
 }
 

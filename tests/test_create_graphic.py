@@ -567,3 +567,179 @@ class TestPublishReplyParsing:
         client = self._client(tmp_path, {"status": "ok", "media": {"pk": "1"}}, RuntimeError("network down"))
         with patch("create_graphic.login_user", return_value=client), patch("create_graphic.WEB_DIR", tmp_path):
             assert publish("2026-10-14", "caption") == "Failed to publish: network down"
+
+
+class TestPublishGuards:
+    """publish() checks the date folder before logging in, refuses to post a
+    date twice without force, and records each request's outcome so a page
+    that lost its connection can ask how it ended."""
+
+    @staticmethod
+    def _post_dir(tmp_path, cover=True, readings=True):
+        from PIL import Image
+
+        post_dir = tmp_path / "2026-10-15"
+        post_dir.mkdir()
+        if cover:
+            Image.new("RGB", (100, 100), "white").save(post_dir / "mateusztront.jpg")
+        if readings:
+            (post_dir / "EWANGELIA1.jpg").write_bytes(b"fake")
+        return post_dir
+
+    @staticmethod
+    def _client(code="DCode123"):
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock
+
+        client = MagicMock()
+        client.album_upload.return_value = SimpleNamespace(code=code)
+        return client
+
+    @staticmethod
+    def _publish(tmp_path, client, *args, **kwargs):
+        from unittest.mock import patch
+        from create_graphic import publish
+
+        with patch("create_graphic.login_user", return_value=client), patch("create_graphic.WEB_DIR", tmp_path):
+            return publish("2026-10-15", "caption", *args, **kwargs)
+
+    def test_missing_folder_fails_without_login(self, tmp_path):
+        from unittest.mock import MagicMock, patch
+        from create_graphic import publish
+
+        login = MagicMock()
+        with patch("create_graphic.login_user", login), patch("create_graphic.WEB_DIR", tmp_path):
+            assert publish("2026-10-15", "caption").startswith("Nothing to publish for 2026-10-15")
+        login.assert_not_called()
+
+    def test_missing_cover_fails_without_login(self, tmp_path):
+        from unittest.mock import MagicMock, patch
+        from create_graphic import publish
+
+        self._post_dir(tmp_path, cover=False)
+        login = MagicMock()
+        with patch("create_graphic.login_user", login), patch("create_graphic.WEB_DIR", tmp_path):
+            assert publish("2026-10-15", "caption").startswith("No cover image found")
+        login.assert_not_called()
+
+    def test_missing_readings_fails_without_login(self, tmp_path):
+        from unittest.mock import MagicMock, patch
+        from create_graphic import publish
+
+        self._post_dir(tmp_path, readings=False)
+        login = MagicMock()
+        with patch("create_graphic.login_user", login), patch("create_graphic.WEB_DIR", tmp_path):
+            assert publish("2026-10-15", "caption").startswith("No reading graphics")
+        login.assert_not_called()
+
+    def test_success_writes_marker(self, tmp_path):
+        import json
+        from unittest.mock import patch
+        from create_graphic import get_published_at, PUBLISHED_MARKER
+
+        post_dir = self._post_dir(tmp_path)
+        assert self._publish(tmp_path, self._client()) == ""
+
+        marker = json.loads((post_dir / PUBLISHED_MARKER).read_text(encoding="utf-8"))
+        assert marker["media_code"] == "DCode123"
+        with patch("create_graphic.WEB_DIR", tmp_path):
+            assert get_published_at("2026-10-15") == marker["published_at"] != ""
+
+    def test_failure_writes_no_marker(self, tmp_path):
+        from create_graphic import PUBLISHED_MARKER
+
+        post_dir = self._post_dir(tmp_path)
+        client = self._client()
+        client.album_upload.side_effect = RuntimeError("network down")
+        assert self._publish(tmp_path, client) == "Failed to publish: network down"
+        assert not (post_dir / PUBLISHED_MARKER).exists()
+
+    def test_reply_parse_error_after_success_writes_marker_with_code(self, tmp_path):
+        import json
+        from create_graphic import PUBLISHED_MARKER
+
+        post_dir = self._post_dir(tmp_path)
+        client = self._client()
+        client.album_upload.side_effect = TestPublishReplyParsing._validation_error()
+        client.last_json = {"status": "ok", "media": {"pk": "1", "code": "DFromJson"}}
+        assert self._publish(tmp_path, client) == ""
+        assert json.loads((post_dir / PUBLISHED_MARKER).read_text())["media_code"] == "DFromJson"
+
+    def test_already_published_is_refused_without_force(self, tmp_path):
+        self._post_dir(tmp_path)
+        assert self._publish(tmp_path, self._client()) == ""
+
+        second = self._client()
+        msg = self._publish(tmp_path, second)
+        assert msg.startswith("The post for 2026-10-15 was already published at")
+        second.album_upload.assert_not_called()
+
+    def test_already_published_goes_out_again_with_force(self, tmp_path):
+        self._post_dir(tmp_path)
+        assert self._publish(tmp_path, self._client()) == ""
+
+        second = self._client()
+        assert self._publish(tmp_path, second, True) == ""
+        second.album_upload.assert_called_once()
+
+    def test_unreadable_marker_still_counts_as_published(self, tmp_path):
+        from unittest.mock import patch
+        from create_graphic import get_published_at, PUBLISHED_MARKER
+
+        post_dir = self._post_dir(tmp_path)
+        (post_dir / PUBLISHED_MARKER).write_text("not json")
+        with patch("create_graphic.WEB_DIR", tmp_path):
+            assert get_published_at("2026-10-15") == "an unknown time"
+            assert get_published_at("2026-10-16") == ""
+
+    def test_publish_result_is_recorded_by_request_id(self, tmp_path):
+        from create_graphic import get_publish_result
+
+        self._post_dir(tmp_path)
+        assert get_publish_result("req-never-sent") == {"state": "unknown"}
+
+        assert self._publish(tmp_path, self._client(), False, "req-ok") == ""
+        assert get_publish_result("req-ok") == {"state": "done", "message": ""}
+
+        msg = self._publish(tmp_path, self._client(), False, "req-dup")
+        assert get_publish_result("req-dup") == {"state": "done", "message": msg}
+        assert msg.startswith("The post for 2026-10-15 was already published")
+
+    def test_publish_result_is_running_while_publishing(self, tmp_path):
+        from create_graphic import get_publish_result
+
+        self._post_dir(tmp_path)
+        client = self._client()
+        seen = {}
+
+        def upload(**kwargs):
+            seen["state"] = get_publish_result("req-slow")
+
+        client.album_upload.side_effect = upload
+        assert self._publish(tmp_path, client, False, "req-slow") == ""
+        assert seen["state"] == {"state": "running"}
+
+    def test_only_newest_cover_is_posted(self, tmp_path):
+        import os
+        from PIL import Image
+
+        post_dir = self._post_dir(tmp_path)  # new cover: mateusztront.jpg
+        Image.new("RGB", (100, 100), "red").save(post_dir / "cover.jpg")  # left from an earlier publish
+        os.utime(post_dir / "cover.jpg", (1, 1))
+        client = self._client()
+        assert self._publish(tmp_path, client) == ""
+
+        paths = client.album_upload.call_args.kwargs["paths"]
+        assert [os.path.basename(p) for p in paths] == ["cover.jpg", "EWANGELIA1.jpg"]
+        assert not (post_dir / "mateusztront.jpg").exists()
+        assert Image.open(post_dir / "cover.jpg").getpixel((540, 540)) == (255, 255, 255)
+
+    def test_unexpected_crash_is_reported_not_raised(self, tmp_path):
+        from unittest.mock import patch
+        from create_graphic import get_publish_result, publish
+
+        self._post_dir(tmp_path)
+        with patch("create_graphic._publish", side_effect=KeyError("boom")):
+            msg = publish("2026-10-15", "caption", False, "req-crash")
+        assert msg.startswith("Failed to publish:")
+        assert get_publish_result("req-crash") == {"state": "done", "message": msg}

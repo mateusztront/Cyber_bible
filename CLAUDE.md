@@ -45,6 +45,8 @@ uv run pytest tests/test_create_graphic.py -v
 
 ### Frontend
 - **`web/`**: Eel frontend (index.html, script.js) communicates with Python via `eel.draw_post()`, `eel.publish()`, etc.
+- **`web/connection.js`**: Patches eel.js so calls survive phones dropping the websocket (reconnect, fail pending calls on close, timeouts). `publish()` writes `web/{date}/_published.json` and refuses to post a date twice unless `force` is passed.
+- **Logs**: stdout plus `logs/app.log` (rotating). The browser reports reconnects there via `client_log()`.
 
 ### Data Flow
 ```

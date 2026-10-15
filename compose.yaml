@@ -10,4 +10,10 @@ services:
       - ./assets/fonts:/app/assets/fonts:ro   # Tahoma, read-only
       - ./session.json:/app/session.json      # Instagram session survives restarts
       - ./web:/app/web                        # generated posts land in your web/ folder
+      - ./logs:/app/logs                      # app.log survives rebuilds (needs uid 1000: chown 1000:1000 logs)
     restart: unless-stopped   # come back after a crash or reboot
+    logging:                  # cap Docker's own copy of the output at 3 × 10 MB
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
