@@ -27,6 +27,7 @@ from config import (
     FONT_SIZE_MAX,
     FONT_SIZE_PSALM,
     FONT_SIZE_MIN,
+    FONT_SIZE_READABLE,
     WEB_DIR,
     LITURGY_URL_PL,
     LITURGY_URL_EN,
@@ -42,7 +43,8 @@ from draw_posts import (
     draw_text_pagination_middle,
     draw_text_pagination_second,
     draw_psalm,
-    wrap_text,
+    count_body_lines,
+    count_intro_lines,
 )
 from login import login_user
 from midjourney_wrapper import MidjourneyWrapper
@@ -1013,8 +1015,8 @@ def _generate_reading_images(
             # Single page - use optimal font calculated by pagination
             result = draw_text(content_dic, background, reading_name, optimal_font)
 
-            # The estimator can be optimistic (it counts characters via wrap_text,
-            # not real glyph widths). Verify the rendered text actually fits and
+            # The estimator can be optimistic (its margins are approximate).
+            # Verify the rendered text actually fits and
             # shrink the font if the closing line would clip the bottom edge.
             while not _text_fits(result["drawn_y"], optimal_font) and optimal_font > FONT_SIZE_MIN:
                 optimal_font -= 1
@@ -1114,10 +1116,6 @@ def _estimate_text_height(content: List[str], font_size: int, is_first_page: boo
     """
 
     line_height = int(1.2 * font_size)
-    # Based on _calculate_layout() in draw_posts.py, minus safety margin
-    # for proportional font width variation (wide Polish chars like W, Ś, ą)
-    size_x_left = int(25 / 12 * font_size)
-    width = int(75 - 0.325 * size_x_left) - 3
 
     total_lines = 0
 
@@ -1128,12 +1126,9 @@ def _estimate_text_height(content: List[str], font_size: int, is_first_page: boo
         subtitle = content[1] if len(content) > 1 else ""
         if subtitle:
             total_lines += 1
-        # Bold intro: count wrapped lines using a tighter width — bold glyphs
-        # render ~10% wider per char than the regular font this width is calibrated for
         intro = content[2] if len(content) > 2 else ""
         if intro:
-            bold_width = max(int(width * 0.9), 1)
-            total_lines += max(len(wrap_text(intro, bold_width)), 1)
+            total_lines += max(count_intro_lines(intro, font_size), 1)
         # Gap between header and body
         total_lines += 1
         body_start = 3
@@ -1141,8 +1136,7 @@ def _estimate_text_height(content: List[str], font_size: int, is_first_page: boo
         body_start = 0
 
     for paragraph in content[body_start:]:
-        wrapped = wrap_text(paragraph, width)
-        total_lines += max(len(wrapped), 1)
+        total_lines += max(count_body_lines(paragraph, font_size), 1)
 
     return total_lines * line_height + (font_size * 2)  # Safe margin
 
@@ -1185,57 +1179,44 @@ def _build_pages(header_content, body_content, closing, split_indices):
     return pages
 
 
-def _calculate_optimal_pagination(
+def _paginate_with_font_floor(
     content: List[str],
-    font_size: int,
-    max_height: int = IMAGE_SIZE - 40,
-    reading_name: str = "",
-    max_pages: int = MAX_PAGES_PER_READING,
-    prefer_readability: bool = False,
-) -> Tuple[int, int, List[List[str]]]:
+    max_height: int,
+    max_pages: int,
+    prefer_readability: bool,
+    font_floor: int,
+) -> Optional[Tuple[int, int, List[List[str]]]]:
     """
-    Find the split (num_pages + font) that maximises font size.
+    Best pagination using only fonts >= font_floor, or None if nothing fits.
 
-    Uses greedy packing: for each font size (large→small), greedily fill pages
-    until all content fits within max_pages.  O(fonts × paragraphs) — no
-    combinatorial explosion.
-
-    When prefer_readability is True (Passion Gospels), the algorithm picks the
-    largest font that fits within the page limit — accepting more pages for
-    better readability.  Otherwise it minimises pages first.
-
-    Returns:
-        Tuple of (num_pages, optimal_font_size, list of content per page)
+    Single page is tried first; otherwise greedy-packs pages for each font
+    (large→small) preferring fewest pages, then the largest font.
     """
     header_content = content[:3]   # reference, subtitle, intro
     body_content = content[3:-1]   # body paragraphs
     closing = content[-1:]         # closing phrase
-    n = len(body_content)
 
     # --- 1 page ---
-    for test_font in range(FONT_SIZE_MAX, FONT_SIZE_MIN - 1, -2):
+    for test_font in range(FONT_SIZE_MAX, font_floor - 1, -2):
         if _estimate_text_height(content, test_font, is_first_page=True) <= max_height:
             return 1, test_font, [content]
 
     # --- multi-page: greedy packing, prefer fewest pages then largest font ---
 
     best_num = max_pages + 1
-    best_font = FONT_SIZE_MIN - 1
+    best_font = font_floor - 1
     best_pages = None
 
-    for test_font in range(FONT_SIZE_MAX, FONT_SIZE_MIN - 1, -2):
+    for test_font in range(FONT_SIZE_MAX, font_floor - 1, -2):
         line_height = int(1.2 * test_font)
-        size_x_left = int(25 / 12 * test_font)
-        width = int(75 - 0.325 * size_x_left) - 3
-        para_lines = [max(len(wrap_text(p, width)), 1) for p in body_content]
+        para_lines = [max(count_body_lines(p, test_font), 1) for p in body_content]
 
         # Header height for first page
         header_lines = 1
         if len(content) > 1 and content[1]:
             header_lines += 1
         if len(content) > 2 and content[2]:
-            bold_width = max(int(width * 0.9), 1)
-            header_lines += max(len(wrap_text(content[2], bold_width)), 1)
+            header_lines += max(count_intro_lines(content[2], test_font), 1)
         header_lines += 1  # gap
         margin = test_font * 2
         max_lines = (max_height - margin) // line_height
@@ -1283,6 +1264,46 @@ def _calculate_optimal_pagination(
 
     if best_pages:
         return best_num, best_font, best_pages
+
+    return None
+
+
+def _calculate_optimal_pagination(
+    content: List[str],
+    font_size: int,
+    max_height: int = IMAGE_SIZE - 40,
+    reading_name: str = "",
+    max_pages: int = MAX_PAGES_PER_READING,
+    prefer_readability: bool = False,
+) -> Tuple[int, int, List[List[str]]]:
+    """
+    Find the split (num_pages + font) that maximises font size.
+
+    Uses greedy packing: for each font size (large→small), greedily fill pages
+    until all content fits within max_pages.  O(fonts × paragraphs) — no
+    combinatorial explosion.
+
+    When prefer_readability is True (Passion Gospels), the algorithm picks the
+    largest font that fits within the page limit — accepting more pages for
+    better readability.  Otherwise it minimises pages first.
+
+    Returns:
+        Tuple of (num_pages, optimal_font_size, list of content per page)
+    """
+    header_content = content[:3]   # reference, subtitle, intro
+    body_content = content[3:-1]   # body paragraphs
+    closing = content[-1:]         # closing phrase
+    n = len(body_content)
+
+    # Two passes: first only consider fonts readable on a phone (splitting into
+    # more pages if needed), then fall back to the full range down to
+    # FONT_SIZE_MIN when the page limit can't keep the text that large.
+    for font_floor in (FONT_SIZE_READABLE, FONT_SIZE_MIN):
+        result = _paginate_with_font_floor(
+            content, max_height, max_pages, prefer_readability, font_floor
+        )
+        if result:
+            return result
 
     # Fallback: even split at minimum font
     pages_needed = min(max_pages, n + 1)

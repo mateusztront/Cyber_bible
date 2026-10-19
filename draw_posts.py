@@ -144,6 +144,44 @@ def _wrap_to_pixel_width(
     return wrap_words(text, lambda line, _: draw.textlength(line, font=font) <= max_width)
 
 
+def _wrap_body_paragraph(
+    draw: ImageDraw.Draw,
+    paragraph: str,
+    font: ImageFont.FreeTypeFont,
+    layout: Dict[str, int],
+) -> List[str]:
+    """
+    Wrap a justified body paragraph in real glyph pixels.
+
+    The first line is indented by size_x_left, so it gets that much less room.
+    Character-count wrapping is only calibrated around the default font size;
+    at larger sizes it packs too many words and the justifier has to squeeze
+    the spaces out of the line.
+    """
+    indent = layout["size_x_left"]
+    width = layout["size_x_right"]
+    return wrap_words(
+        paragraph,
+        lambda line, index: draw.textlength(line, font=font) + (indent if index == 0 else 0) <= width,
+    )
+
+
+_MEASURE_DRAW = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+
+
+def count_body_lines(paragraph: str, font_size: int) -> int:
+    """Number of lines a body paragraph occupies when rendered at font_size."""
+    fnt, _, _ = _load_fonts(font_size)
+    return len(_wrap_body_paragraph(_MEASURE_DRAW, paragraph, fnt, _calculate_layout(font_size)))
+
+
+def count_intro_lines(text: str, font_size: int) -> int:
+    """Number of lines the bold intro ("Słowa Ewangelii...") occupies at font_size."""
+    _, fnt_b, _ = _load_fonts(font_size)
+    width = _calculate_layout(font_size)["size_x_right"]
+    return len(_wrap_to_pixel_width(_MEASURE_DRAW, text, fnt_b, width))
+
+
 def _fit_reference_font(
     draw: ImageDraw.Draw,
     title: str,
@@ -198,14 +236,13 @@ def _draw_justified_paragraph(
     size_x_left = layout["size_x_left"]
     size_x_right = layout["size_x_right"]
     size_y = layout["size_y"]
-    width = layout["width"]
 
     for paragraph in paragraphs:
-        lines = wrap_text(paragraph, width, first_line_indent=5)
+        lines = _wrap_body_paragraph(draw, paragraph, font, layout)
         if not lines:
             continue
 
-        space_length_regular = 15
+        space_length_natural = draw.textlength(" ", font=font)
 
         for line_count, line in enumerate(lines):
             x_word = size_x_left
@@ -218,17 +255,15 @@ def _draw_justified_paragraph(
                 words.append(" ")
                 for word in words:
                     draw.text((x_word, var_y), word, font=font, fill="black", anchor="lm")
-                    x_word += draw.textlength(word, font=font) + space_length_regular
+                    x_word += draw.textlength(word, font=font) + space_length_natural
                 var_y += size_y
                 continue
 
-            # Last line - left-aligned, not justified
+            # Last line - left-aligned with natural spacing, not justified
             if line_count == len(lines) - 1:
-                if words_length + (len(words) - 1) * space_length_regular > size_x_right:
-                    space_length_regular = (size_x_right - words_length) / (len(words) - 1)
                 for word in words:
                     draw.text((x_word, var_y), word, font=font, fill="black", anchor="lm")
-                    x_word += draw.textlength(word, font=font) + space_length_regular
+                    x_word += draw.textlength(word, font=font) + space_length_natural
                 var_y += size_y
                 continue
 

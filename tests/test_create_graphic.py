@@ -399,6 +399,17 @@ class TestGospelPagination:
         )
         assert num_pages == 1
 
+    def test_medium_gospel_splits_instead_of_shrinking(self):
+        # ~1300 chars only fits one page below the readable size — it must be
+        # split so the text stays legible on a phone.
+        from config import FONT_SIZE_READABLE
+        content = self._make_gospel_content(1300)
+        num_pages, font, pages = _calculate_optimal_pagination(
+            content, 44, reading_name="EWANGELIA", max_pages=MAX_PAGES_PER_READING,
+        )
+        assert font >= FONT_SIZE_READABLE
+        assert num_pages >= 2
+
 
 class TestExtractVigilPageNums:
     """Tests for _extract_vigil_page_nums (content_index sub-page detection)."""

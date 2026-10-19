@@ -46,6 +46,10 @@ FONT_SIZE_DEFAULT = 44
 FONT_SIZE_MAX = 60  # Maximum font size for autofit
 FONT_SIZE_PSALM = 34
 FONT_SIZE_MIN = 30  # Minimum font size for pagination
+# Smallest font still comfortable to read on a phone. Readings that would need a
+# smaller font are split across more pages instead (down to FONT_SIZE_MIN only
+# when even the page limit can't keep them above this).
+FONT_SIZE_READABLE = 40
 
 # Text layout
 TEXT_PADDING_LEFT = 25
