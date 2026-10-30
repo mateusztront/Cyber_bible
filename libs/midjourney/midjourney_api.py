@@ -294,7 +294,7 @@ class MidjourneyApi:
                 continue
 
             # Must contain our prompt keywords in message content
-            content = msg.get("content", "").lower()
+            content = self._normalize_whitespace(msg.get("content", "")).lower()
             if prompt_keywords and prompt_keywords in content:
                 logger.debug(f"Found matching message: {msg.get('id')}")
                 return msg
@@ -306,10 +306,16 @@ class MidjourneyApi:
         Extract first portion of prompt for matching.
 
         Midjourney includes the prompt in message content, so we can verify
-        the message is for our specific prompt.
+        the message is for our specific prompt. It echoes newlines and runs of
+        spaces as a single space, so whitespace is collapsed before matching.
         """
         # Take first 30 chars, lowercase, for matching
-        return prompt[:30].lower().strip()
+        return self._normalize_whitespace(prompt)[:30].lower().strip()
+
+    @staticmethod
+    def _normalize_whitespace(text: str) -> str:
+        """Collapse newlines and repeated spaces into single spaces."""
+        return " ".join(text.split())
 
     def _parse_discord_timestamp(self, timestamp_str: str) -> float:
         """Parse Discord ISO timestamp to Unix timestamp."""
