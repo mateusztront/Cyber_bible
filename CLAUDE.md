@@ -31,7 +31,7 @@ uv run pytest tests/test_create_graphic.py -v
 ## Architecture
 
 ### Core Pipeline
-1. **Scraping** (`create_graphic.py`): Fetches readings from `liturgia.wiara.pl` and Vatican News
+1. **Scraping** (`create_graphic.py`): Fetches readings from `liturgia.wiara.pl`, cross-checked with `brewiarz.pl`
 2. **Processing** (`create_graphic.py`): Parses HTML, normalizes content, handles reading variants (shorter/longer versions)
 3. **Rendering** (`draw_posts.py`): PIL-based text rendering with justified alignment, automatic pagination for long readings
 4. **Publishing** (`login.py`, `create_graphic.py`): Instagram upload via instagrapi with session management

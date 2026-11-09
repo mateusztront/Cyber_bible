@@ -208,7 +208,7 @@ class TestDrawPostIntegration:
              patch.object(create_graphic, "_generate_reading_images",
                           side_effect=lambda dic, *a, **k: [f"{n}.jpg" for n in dic if "PSALM" not in n]) as gen, \
              patch.object(create_graphic, "_generate_psalm_image", return_value="PSALM RESPONSORYJNY.jpg"):
-            box = create_graphic.draw_post(WEEKDAY_FEAST, 0, 1)
+            box = create_graphic.draw_post(WEEKDAY_FEAST, 1)
 
         assert box[1:] == ["PIERWSZE CZYTANIE.jpg", "EWANGELIA.jpg", "PSALM RESPONSORYJNY.jpg"]
         rendered = gen.call_args.args[0]

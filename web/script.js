@@ -377,9 +377,6 @@ function resetForNewDate() {
     // Clear prompt textarea
     document.getElementById('midjourney-prompt').value = '';
 
-    // Reset verse break to 0
-    document.getElementById('verse_break').value = '0';
-
     // Disable buttons until readings loaded
     document.getElementById('generate-prompt-btn').disabled = true;
     document.getElementById('generate-variations-btn').disabled = true;
@@ -611,12 +608,11 @@ document.querySelectorAll('.grid-quadrant').forEach(quadrant => {
 // Create post button
 document.querySelector(".posts").onclick = async function() {
     const thedate = document.getElementById('input_date').value;
-    const verse_break = document.getElementById('verse_break').value;
 
-    console.log('Creating post for:', thedate, 'verse_break:', verse_break);
+    console.log('Creating post for:', thedate);
 
     try {
-        const box = await eel.draw_post(thedate, verse_break, firstReadingChoice())();
+        const box = await eel.draw_post(thedate, firstReadingChoice())();
         console.log('Generated files:', box);
 
         const container = document.getElementById('images-container');
@@ -644,28 +640,6 @@ document.querySelector(".posts").onclick = async function() {
         alert('Error creating post. Check console for details.');
     }
 }
-
-// English readings button
-document.querySelector(".english_readings").onclick = async function() {
-    const thedate = document.getElementById('input_date').value;
-
-    try {
-        const content_list_text = await eel.readings_eng(thedate)();
-        console.log('English readings:', content_list_text);
-
-        const container = document.getElementById('content-container');
-
-        for (let i = 0; i < content_list_text.length; i++) {
-            const newDiv = document.createElement('div');
-            const newContent = document.createTextNode(content_list_text[i]);
-            newDiv.appendChild(newContent);
-            container.appendChild(newDiv);
-        }
-    } catch (error) {
-        console.error('Error fetching English readings:', error);
-    }
-}
-
 
 // Publish button
 function showPublishStatus(message, type) {

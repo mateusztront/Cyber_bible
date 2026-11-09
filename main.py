@@ -51,7 +51,7 @@ WEB_DIR.mkdir(parents=True, exist_ok=True)
 eel.init(str(WEB_DIR))
 
 # Now import exposed functions - @eel.expose will register correctly
-from create_graphic import draw_post, readings_eng, readings_pol, publish
+from create_graphic import draw_post, readings_pol, publish
 from login import check_2fa_needed, submit_2fa_code
 
 

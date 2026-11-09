@@ -87,7 +87,6 @@ ELEVENLABS_API_URL = "https://api.elevenlabs.io/v1"
 # =============================================================================
 
 LITURGY_URL_PL = "https://liturgia.wiara.pl/kalendarz/67b53.Czytania-mszalne"
-LITURGY_URL_EN = "https://www.vaticannews.va/en/word-of-the-day"
 # Cross-check for the structure of the day (is there really a second reading?).
 # liturgia.wiara.pl prints the alternative first reading of weekday feasts as
 # DRUGIE CZYTANIE; brewiarz.pl lists it correctly as "Albo:" PIERWSZE CZYTANIE.

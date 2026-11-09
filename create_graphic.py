@@ -30,7 +30,6 @@ from config import (
     FONT_SIZE_READABLE,
     WEB_DIR,
     LITURGY_URL_PL,
-    LITURGY_URL_EN,
     BREWIARZ_URL,
     DEFAULT_HASHTAGS,
     MAX_CAROUSEL_IMAGES,
@@ -1097,7 +1096,6 @@ def _generate_reading_images(
     content_dic: Dict[str, List[str]],
     background: Image.Image,
     output_path: Path,
-    verse_break: int,
     passion_mode: bool = False,
 ) -> List[str]:
     """Generate images for all readings with smart auto-pagination."""
@@ -1558,21 +1556,18 @@ def _generate_vigil_images(
 
 
 @eel.expose
-def draw_post(thedate: str, verse_break: int = 0, first_reading_choice: int = 0) -> List[str]:
+def draw_post(thedate: str, first_reading_choice: int = 0) -> List[str]:
     """
     Create post graphics for a given date.
 
     Args:
         thedate: Date string in YYYY-MM-DD format
-        verse_break: Manual break point for pagination (0 for auto)
         first_reading_choice: On weekday feasts with two first readings to
             choose from, 0 = first option, 1 = the alternative
 
     Returns:
         List of generated file paths
     """
-    verse_break = int(verse_break)
-
     logger.info(f"Fetching readings for {thedate}")
 
     try:
@@ -1633,7 +1628,7 @@ def draw_post(thedate: str, verse_break: int = 0, first_reading_choice: int = 0)
         order_file.write_text("\n".join(posts_list), encoding="utf-8")
         logger.info(f"Easter Vigil: {len(posts_list)} images, order saved to _order.txt")
     else:
-        posts_list = _generate_reading_images(content_dic, background, output_path, verse_break, passion_mode=is_passion)
+        posts_list = _generate_reading_images(content_dic, background, output_path, passion_mode=is_passion)
         posts_list.append(_generate_psalm_image(content_dic, background, output_path))
 
     if is_passion:
@@ -1642,27 +1637,6 @@ def draw_post(thedate: str, verse_break: int = 0, first_reading_choice: int = 0)
     logger.info(f"Generated {len(posts_list)} images")
 
     return ["/" + thedate + "/"] + posts_list
-
-
-@eel.expose
-def readings_eng(thedate: str) -> List[List[str]]:
-    """Fetch English readings from Vatican News."""
-    url = f"{LITURGY_URL_EN}/{thedate.replace('-', '/')}.html"
-
-    try:
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()
-    except requests.RequestException as e:
-        logger.error(f"Failed to fetch English readings: {e}")
-        return []
-
-    soup = BeautifulSoup(response.content, "html.parser")
-    content_sections = soup.find_all("div", "section__content")
-
-    return [
-        [line.replace('"', "") for line in section.get_text().split("\n")]
-        for section in content_sections
-    ]
 
 
 def _parse_polish_reference(reference: str) -> Optional[str]:
@@ -2261,4 +2235,4 @@ def upscale_cover(thedate: str, message_id: str, custom_id: str) -> str:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    draw_post("2025-04-25", 8)
+    draw_post("2025-04-25")
