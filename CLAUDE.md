@@ -68,6 +68,7 @@ Long readings automatically paginate using font size reduction first (down to `F
 ## Workflow Rules
 
 - Git commit and push after completing major changes or features
+- Pushing to `master` deploys: the production server picks up every new `master` commit within ~2 minutes and rebuilds the app. So work on `master` (not the stale `main`), push only finished, tested changes, and push to `master` itself rather than a side branch when the user wants a change live. A push to any other branch goes nowhere until it is merged into `master`.
 
 ## Environment Variables
 
