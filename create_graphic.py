@@ -31,6 +31,7 @@ from config import (
     WEB_DIR,
     LITURGY_URL_PL,
     LITURGY_URL_EN,
+    BREWIARZ_URL,
     DEFAULT_HASHTAGS,
     MAX_CAROUSEL_IMAGES,
     EASTER_VIGIL_OT_READING_INDICES,
@@ -669,6 +670,120 @@ def _parse_readings(content_list: List[str]) -> Dict[str, List[str]]:
                 content_dic[cut_points[0]] = staging_list
 
     return content_dic
+
+
+# Fallback only, for when brewiarz.pl can't be reached: feasts (rank "święto")
+# whose lectionary gives two first readings to choose from ("Ez 47 albo
+# 1 Kor 3"). On a weekday a feast has ONE reading before the Gospel; on a Sunday
+# (feasts of the Lord replace it) both are read.
+FEASTS_WITH_ALTERNATIVE_FIRST_READING = {
+    "02-02",  # Ofiarowanie Pańskie: Ml 3 albo Hbr 2
+    "05-31",  # Nawiedzenie NMP: So 3 albo Rz 12
+    "07-22",  # Św. Marii Magdaleny: Pnp 3 albo 2 Kor 5
+    "08-06",  # Przemienienie Pańskie: Dn 7 albo 2 P 1
+    "09-08",  # Narodzenie NMP: Mi 5 albo Rz 8
+    "09-14",  # Podwyższenie Krzyża: Lb 21 albo Flp 2
+    "09-29",  # Archaniołowie: Dn 7 albo Ap 12
+    "11-09",  # Poświęcenie Bazyliki Laterańskiej: Ez 47 albo 1 Kor 3
+}
+
+_ROMAN_MONTHS = ["i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x", "xi", "xii"]
+_DRUGIE_RE = re.compile(r"\bDRUGIE CZYTANIE\b")
+_PIERWSZE_RE = re.compile(r"\bPIERWSZE CZYTANIE\b")
+
+# thedate -> True/False (brewiarz.pl lists a second reading). Only answers that
+# were actually read from brewiarz.pl are cached.
+_brewiarz_cache: Dict[str, bool] = {}
+
+
+def _brewiarz_urls(thedate: str) -> List[str]:
+    """
+    brewiarz.pl readings page candidates for a date, e.g. 2026-11-09 →
+    https://brewiarz.pl/xi_26/0911p/czyt.php3. The "p" folder is the general
+    calendar on days that also have local variants (0811w = Płock); other days
+    use the bare "ddmm" folder.
+    """
+    day = datetime.strptime(thedate, "%Y-%m-%d")
+    base = f"{BREWIARZ_URL}/{_ROMAN_MONTHS[day.month - 1]}_{day:%y}/{day:%d%m}"
+    return [f"{base}p/czyt.php3", f"{base}/czyt.php3"]
+
+
+def _brewiarz_has_second_reading(thedate: str) -> Optional[bool]:
+    """
+    Ask brewiarz.pl whether the Mass of the day has a second reading.
+    True/False, or None when brewiarz.pl can't be reached or parsed.
+    """
+    if thedate in _brewiarz_cache:
+        return _brewiarz_cache[thedate]
+    for url in _brewiarz_urls(thedate):
+        try:
+            response = requests.get(
+                url, timeout=15, headers={"User-Agent": "Mozilla/5.0 (Cyber Bible)"}
+            )
+            if response.status_code != 200:
+                continue
+            text = BeautifulSoup(response.content, "html.parser").get_text(" ")
+        except Exception as e:
+            logger.warning(f"brewiarz.pl check failed for {url}: {e}")
+            continue
+        if not _PIERWSZE_RE.search(text):
+            continue  # not a readings page (wrong folder variant, error page)
+        has_second = bool(_DRUGIE_RE.search(text))
+        logger.info(f"brewiarz.pl {url}: second reading {'present' if has_second else 'absent'}")
+        _brewiarz_cache[thedate] = has_second
+        return has_second
+    logger.warning(f"brewiarz.pl: no readings page found for {thedate}")
+    return None
+
+
+def _has_alternative_first_reading(thedate: str, content_dic: Dict[str, List[str]]) -> bool:
+    """
+    True when the DRUGIE CZYTANIE scraped from liturgia.wiara.pl is really an
+    alternative first reading. brewiarz.pl is the reference; the feast list is
+    only a fallback when it can't be reached.
+    """
+    if "PIERWSZE CZYTANIE" not in content_dic or "DRUGIE CZYTANIE" not in content_dic:
+        return False
+    try:
+        day = datetime.strptime(thedate, "%Y-%m-%d")
+    except ValueError:
+        return False
+
+    has_second = _brewiarz_has_second_reading(thedate)
+    if has_second is not None:
+        return not has_second
+
+    is_sunday = day.weekday() == 6
+    return not is_sunday and day.strftime("%m-%d") in FEASTS_WITH_ALTERNATIVE_FIRST_READING
+
+
+def _apply_first_reading_choice(
+    content_dic: Dict[str, List[str]], thedate: str, choice: int = 0
+) -> None:
+    """
+    On weekday feasts keep a single first reading: the first option by default
+    (choice=0), or the alternative printed as DRUGIE CZYTANIE (choice=1), which
+    then takes the PIERWSZE CZYTANIE slot so it is rendered and ordered as one.
+
+    Must run right after parsing: the Gospel acclamation is still at the end of
+    the DRUGIE CZYTANIE list then, and is moved onto the psalm so the psalm
+    graphic shows it, as on any other weekday.
+    """
+    if not _has_alternative_first_reading(thedate, content_dic):
+        return
+    alternative = content_dic.pop("DRUGIE CZYTANIE")
+    if "ŚPIEW PRZED EWANGELIĄ" in alternative:
+        spiew_idx = alternative.index("ŚPIEW PRZED EWANGELIĄ")
+        psalm = content_dic.get("PSALM RESPONSORYJNY")
+        if psalm is not None and "ŚPIEW PRZED EWANGELIĄ" not in psalm:
+            psalm.extend(alternative[spiew_idx:])
+        alternative = alternative[:spiew_idx]
+    if int(choice or 0) == 1:
+        content_dic["PIERWSZE CZYTANIE"] = alternative
+    logger.info(
+        f"{thedate}: weekday feast — using first reading option {int(choice or 0) + 1} "
+        f"({content_dic['PIERWSZE CZYTANIE'][0] if content_dic['PIERWSZE CZYTANIE'] else '?'})"
+    )
 
 
 def _parse_vigil_readings(content_list: List[str]) -> Dict[str, List[str]]:
@@ -1443,13 +1558,15 @@ def _generate_vigil_images(
 
 
 @eel.expose
-def draw_post(thedate: str, verse_break: int = 0) -> List[str]:
+def draw_post(thedate: str, verse_break: int = 0, first_reading_choice: int = 0) -> List[str]:
     """
     Create post graphics for a given date.
 
     Args:
         thedate: Date string in YYYY-MM-DD format
         verse_break: Manual break point for pagination (0 for auto)
+        first_reading_choice: On weekday feasts with two first readings to
+            choose from, 0 = first option, 1 = the alternative
 
     Returns:
         List of generated file paths
@@ -1477,6 +1594,7 @@ def draw_post(thedate: str, verse_break: int = 0) -> List[str]:
         content_dic = _filter_easter_vigil(content_dic)
     else:
         content_dic = _parse_readings(content_list)
+        _apply_first_reading_choice(content_dic, thedate, first_reading_choice)
 
     # Post-process readings
     _add_psalm_refrains(content_dic)
@@ -1641,7 +1759,7 @@ def _fetch_english_bible_text(reference: str) -> Optional[str]:
 
 
 @eel.expose
-def get_english_reading_text(thedate: str, reading_name: str) -> str:
+def get_english_reading_text(thedate: str, reading_name: str, first_reading_choice: int = 0) -> str:
     """
     Get English reading text by parsing Polish reference and fetching from Bible API.
 
@@ -1654,7 +1772,7 @@ def get_english_reading_text(thedate: str, reading_name: str) -> str:
     """
     try:
         # Get Polish reading to extract reference
-        content_dic = _get_readings_dict(thedate)
+        content_dic = _get_readings_dict(thedate, first_reading_choice)
 
         if reading_name not in content_dic:
             return f"Reading '{reading_name}' not found"
@@ -1911,12 +2029,16 @@ def _publish(thedate: str, caption: str, force: bool) -> str:
 # =============================================================================
 
 
-def _get_readings_dict(thedate: str) -> Dict[str, List[str]]:
+def _get_readings_dict(
+    thedate: str, first_reading_choice: Optional[int] = 0
+) -> Dict[str, List[str]]:
     """
     Fetch and parse readings for a given date.
 
     This is a helper that extracts the readings parsing logic
     so it can be reused by cover generation functions.
+    first_reading_choice=None leaves an alternative first reading in place
+    (as DRUGIE CZYTANIE) instead of picking one.
     """
     content_list = _scrape_content_list(thedate)
     content_list = _normalize_vigil_markers(content_list, thedate)
@@ -1929,6 +2051,8 @@ def _get_readings_dict(thedate: str) -> Dict[str, List[str]]:
         content_dic = _filter_easter_vigil(content_dic)
     else:
         content_dic = _parse_readings(content_list)
+        if first_reading_choice is not None:
+            _apply_first_reading_choice(content_dic, thedate, first_reading_choice)
 
     _add_psalm_refrains(content_dic)
     _truncate_readings(content_dic)
@@ -1942,14 +2066,33 @@ def _get_readings_dict(thedate: str) -> Dict[str, List[str]]:
 
 
 @eel.expose
-def get_readings_for_cover(thedate: str) -> Dict[str, str]:
+def get_first_reading_options(thedate: str) -> List[str]:
+    """
+    References of the first readings to choose from on weekday feasts
+    (e.g. ["Ez 47,1-2.8-9.12", "1 Kor 3.9b-11.16-17"]), or [] on other days.
+    """
+    try:
+        content_dic = _get_readings_dict(thedate, first_reading_choice=None)
+        if not _has_alternative_first_reading(thedate, content_dic):
+            return []
+        return [
+            (content_dic["PIERWSZE CZYTANIE"] or ["?"])[0],
+            (content_dic["DRUGIE CZYTANIE"] or ["?"])[0],
+        ]
+    except Exception as e:
+        logger.error(f"Failed to get first reading options: {e}")
+        return []
+
+
+@eel.expose
+def get_readings_for_cover(thedate: str, first_reading_choice: int = 0) -> Dict[str, str]:
     """
     Get readings dictionary for user to select which one to use for cover.
 
     Returns dict with reading names as keys and preview text as values.
     """
     try:
-        content_dic = _get_readings_dict(thedate)
+        content_dic = _get_readings_dict(thedate, first_reading_choice)
         logger.info(f"get_readings_for_cover({thedate}) -> {list(content_dic.keys())}")
 
         # Return preview (first few lines) of each reading
@@ -1963,10 +2106,10 @@ def get_readings_for_cover(thedate: str) -> Dict[str, str]:
 
 
 @eel.expose
-def get_full_reading_text(thedate: str, reading_name: str) -> str:
+def get_full_reading_text(thedate: str, reading_name: str, first_reading_choice: int = 0) -> str:
     """Get the full text of a specific reading."""
     try:
-        content_dic = _get_readings_dict(thedate)
+        content_dic = _get_readings_dict(thedate, first_reading_choice)
         if reading_name in content_dic:
             return "\n".join(content_dic[reading_name])
         return ""

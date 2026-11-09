@@ -60,6 +60,8 @@ The app handles multiple Polish liturgy readings:
 - DRUGIE CZYTANIE (Second Reading, when present)
 - EWANGELIA (Gospel)
 
+Weekday feasts with two first readings to choose from (e.g. 9 Nov: Ez 47 *albo* 1 Kor 3): liturgia.wiara.pl prints the alternative as DRUGIE CZYTANIE. `_apply_first_reading_choice()` cross-checks the day on **brewiarz.pl** (the reference; no DRUGIE CZYTANIE there = no second reading), keeps one first reading (`first_reading_choice` 0/1, picked in the UI selector that appears on such days) and moves the Gospel acclamation onto the psalm. If brewiarz.pl is unreachable it falls back to `FEASTS_WITH_ALTERNATIVE_FIRST_READING` on non-Sundays.
+
 ### Pagination Logic
 Long readings automatically paginate using font size reduction first (down to `FONT_SIZE_MIN`), then split into 2 or 4 pages via `draw_text_pagination_*` functions.
 

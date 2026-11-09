@@ -28,6 +28,12 @@
         margin-bottom: 20px;
         flex-wrap: wrap;
       }
+      .controls[hidden] {
+        display: none;
+      }
+      #first-reading-choice-row {
+        align-items: center;
+      }
       input, select {
         padding: 8px;
         border: 1px solid #ccc;
@@ -376,6 +382,12 @@
         <button id="next-date-btn" class="secondary" title="Next day">&#9654;</button>
         <button id="load-readings-btn">Load Readings</button>
         <button id="reset-btn" class="secondary">Reset</button>
+      </div>
+
+      <!-- Weekday feasts with two first readings to choose from (e.g. 9 Nov: Ez 47 albo 1 Kor 3) -->
+      <div class="controls" id="first-reading-choice-row" hidden>
+        <label for="first-reading-choice">First reading (choose one):</label>
+        <select id="first-reading-choice"></select>
       </div>
 
       <div class="reading-select">

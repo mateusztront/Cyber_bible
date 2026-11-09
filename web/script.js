@@ -224,7 +224,7 @@ async function displayReading(readingName) {
     textarea.value = 'Loading...';
 
     try {
-        const fullText = await eel.get_full_reading_text(thedate, readingName)();
+        const fullText = await eel.get_full_reading_text(thedate, readingName, firstReadingChoice())();
 
         // Parse reference from first line if present
         const lines = fullText.split('\n');
@@ -247,6 +247,49 @@ async function displayReading(readingName) {
     }
 }
 
+// =============================================================================
+// ALTERNATIVE FIRST READING (weekday feasts, e.g. 9 Nov: Ez 47 albo 1 Kor 3)
+// =============================================================================
+
+// Date the first-reading selector was filled for, so a choice never leaks
+// into another day.
+let firstReadingOptionsDate = '';
+
+function firstReadingChoice() {
+    const row = document.getElementById('first-reading-choice-row');
+    const thedate = document.getElementById('input_date').value;
+    if (row.hidden || thedate !== firstReadingOptionsDate) return 0;
+    return parseInt(document.getElementById('first-reading-choice').value, 10) || 0;
+}
+
+function hideFirstReadingChoice() {
+    document.getElementById('first-reading-choice-row').hidden = true;
+    document.getElementById('first-reading-choice').innerHTML = '';
+    firstReadingOptionsDate = '';
+}
+
+async function loadFirstReadingOptions(thedate) {
+    if (thedate === firstReadingOptionsDate) return;  // keep the user's pick
+    hideFirstReadingChoice();
+    const options = await eel.get_first_reading_options(thedate)();
+    if (!options || options.length < 2) return;
+    const select = document.getElementById('first-reading-choice');
+    options.forEach((ref, i) => {
+        const option = document.createElement('option');
+        option.value = String(i);
+        option.textContent = i === 0 ? ref : `albo: ${ref}`;
+        select.appendChild(option);
+    });
+    firstReadingOptionsDate = thedate;
+    document.getElementById('first-reading-choice-row').hidden = false;
+}
+
+// Switching the first reading reloads the reading tabs / cover list
+document.getElementById('first-reading-choice').onchange = () => {
+    document.getElementById('load-readings-btn').click();
+};
+document.getElementById('input_date').addEventListener('change', hideFirstReadingChoice);
+
 // Load readings for cover generation
 document.getElementById('load-readings-btn').onclick = async function() {
     const thedate = document.getElementById('input_date').value;
@@ -267,7 +310,8 @@ document.getElementById('load-readings-btn').onclick = async function() {
             document.getElementById('cover-preview').style.display = 'block';
         }
 
-        currentReadings = await eel.get_readings_for_cover(thedate)();
+        await loadFirstReadingOptions(thedate);
+        currentReadings = await eel.get_readings_for_cover(thedate, firstReadingChoice())();
 
         const select = document.getElementById('reading-select');
         select.innerHTML = '<option value="">-- Select a reading --</option>';
@@ -345,6 +389,8 @@ function resetForNewDate() {
     const variationsContainer = document.getElementById('prompt-variations-container');
     if (variationsContainer) variationsContainer.style.display = 'none';
 
+    hideFirstReadingChoice();
+
     showStatus('Reset complete. Select a new date and load readings.', 'info');
 }
 
@@ -355,6 +401,7 @@ function shiftDate(days) {
     const current = input.value ? new Date(input.value) : new Date();
     current.setDate(current.getDate() + days);
     input.value = current.toISOString().slice(0, 10);
+    hideFirstReadingChoice();
 }
 document.getElementById('prev-date-btn').onclick = () => shiftDate(-1);
 document.getElementById('next-date-btn').onclick = () => shiftDate(1);
@@ -373,10 +420,10 @@ document.getElementById('reading-select').onchange = async function() {
 
     try {
         // Get Polish reading for display
-        selectedReadingText = await eel.get_full_reading_text(thedate, selectedReadingName)();
+        selectedReadingText = await eel.get_full_reading_text(thedate, selectedReadingName, firstReadingChoice())();
 
         // Get English reading text using Bible API (based on Polish reference)
-        const englishText = await eel.get_english_reading_text(thedate, selectedReadingName)();
+        const englishText = await eel.get_english_reading_text(thedate, selectedReadingName, firstReadingChoice())();
 
         if (englishText && !englishText.startsWith('Error') && !englishText.startsWith('Could not')) {
             document.getElementById('midjourney-prompt').value = englishText + ' --ar 1:1';
@@ -569,7 +616,7 @@ document.querySelector(".posts").onclick = async function() {
     console.log('Creating post for:', thedate, 'verse_break:', verse_break);
 
     try {
-        const box = await eel.draw_post(thedate, verse_break)();
+        const box = await eel.draw_post(thedate, verse_break, firstReadingChoice())();
         console.log('Generated files:', box);
 
         const container = document.getElementById('images-container');
