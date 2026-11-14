@@ -47,6 +47,7 @@ from draw_posts import (
     count_intro_lines,
 )
 from login import login_user
+import social
 from midjourney_wrapper import MidjourneyWrapper
 from prompt_generator import generate_midjourney_prompt, generate_prompt_variations
 
@@ -1814,9 +1815,14 @@ Grafika wykonana za pomocą sztucznej inteligencji.
 """
 
 
-# Written into a date folder once its post is live on Instagram, so the same
-# date isn't published twice by accident (e.g. retrying after a lost reply).
+# Written into a date folder once its post is live, so the same date isn't
+# published twice by accident (e.g. retrying after a lost reply). Holds one
+# entry per platform; the top-level published_at/media_code are Instagram's,
+# as in markers written before Facebook and X were added.
 PUBLISHED_MARKER = "_published.json"
+
+PLATFORMS = ("instagram", "facebook", "x")
+PLATFORM_LABELS = {"instagram": "Instagram", "facebook": "Facebook", "x": "X"}
 
 # Outcome of each publish request, keyed by the id the browser sends with it:
 # None while running, then "" on success or the error message. A page that lost
@@ -1824,16 +1830,51 @@ PUBLISHED_MARKER = "_published.json"
 _publish_results: Dict[str, Optional[str]] = {}
 
 
+def _read_published(working_path: Path) -> Dict[str, Dict[str, Optional[str]]]:
+    """Platform -> {"published_at", "id"} for every platform this date went out on."""
+    marker = working_path / PUBLISHED_MARKER
+    if not marker.exists():
+        return {}
+    try:
+        data = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        # Something was published; assume Instagram, the only platform that
+        # wrote markers before, rather than risk a duplicate post.
+        return {"instagram": {"published_at": "an unknown time", "id": None}}
+    if not isinstance(data, dict):
+        return {"instagram": {"published_at": "an unknown time", "id": None}}
+    platforms = dict(data.get("platforms") or {})
+    if "instagram" not in platforms and data.get("published_at"):
+        platforms["instagram"] = {"published_at": data["published_at"], "id": data.get("media_code")}
+    return platforms
+
+
 @eel.expose
 def get_published_at(thedate: str) -> str:
-    """When the post for this date was published, or "" if it hasn't been."""
-    marker = WEB_DIR / thedate / PUBLISHED_MARKER
-    if not marker.exists():
+    """When the Instagram post for this date was published, or "" if it hasn't been."""
+    entry = _read_published(WEB_DIR / thedate).get("instagram")
+    if not entry:
         return ""
-    try:
-        return json.loads(marker.read_text(encoding="utf-8"))["published_at"]
-    except (OSError, ValueError, KeyError):
-        return "an unknown time"
+    return entry.get("published_at") or "an unknown time"
+
+
+@eel.expose
+def get_publish_status(thedate: str) -> Dict[str, str]:
+    """Platform -> when this date was published there (only platforms it went out on)."""
+    return {
+        platform: entry.get("published_at") or "an unknown time"
+        for platform, entry in _read_published(WEB_DIR / thedate).items()
+    }
+
+
+@eel.expose
+def get_publish_platforms() -> Dict[str, bool]:
+    """Which platforms are set up in .env (the UI greys out the others)."""
+    return {
+        "instagram": True,
+        "facebook": social.facebook_configured(),
+        "x": social.x_configured(),
+    }
 
 
 @eel.expose
@@ -1847,37 +1888,56 @@ def get_publish_result(request_id: str) -> Dict[str, str]:
     return {"state": "done", "message": msg}
 
 
-def _mark_published(working_path: Path, media_code: Optional[str]) -> None:
-    marker = {
-        "published_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-        "media_code": media_code,
-    }
+def _mark_published(working_path: Path, platform: str, post_id: Optional[str]) -> None:
+    marker_path = working_path / PUBLISHED_MARKER
     try:
-        (working_path / PUBLISHED_MARKER).write_text(json.dumps(marker), encoding="utf-8")
+        data = json.loads(marker_path.read_text(encoding="utf-8")) if marker_path.exists() else {}
+        if not isinstance(data, dict):
+            data = {}
+    except (OSError, ValueError):
+        data = {}
+    now = datetime.now().astimezone().isoformat(timespec="seconds")
+    platforms = data.setdefault("platforms", {})
+    if "instagram" not in platforms and data.get("published_at"):
+        platforms["instagram"] = {"published_at": data["published_at"], "id": data.get("media_code")}
+    platforms[platform] = {"published_at": now, "id": post_id}
+    if platform == "instagram":
+        data["published_at"] = now
+        data["media_code"] = post_id
+    try:
+        marker_path.write_text(json.dumps(data), encoding="utf-8")
     except OSError as e:
         # The post is live, so this must not turn into a failure.
-        logger.warning(f"Published, but could not write {PUBLISHED_MARKER}: {e}")
+        logger.warning(f"Published to {platform}, but could not write {PUBLISHED_MARKER}: {e}")
 
 
 @eel.expose
-def publish(thedate: str, caption: str, force: bool = False, request_id: str = "") -> str:
+def publish(
+    thedate: str,
+    caption: str,
+    force: bool = False,
+    request_id: str = "",
+    platforms: Optional[List[str]] = None,
+) -> str:
     """
-    Publish images to Instagram.
+    Publish the date's images to Instagram, Facebook and/or X.
 
     Args:
         thedate: Date string for the post
         caption: Custom caption text
-        force: Publish even if this date was already published
+        force: Publish even where this date was already published
         request_id: Browser-generated id for get_publish_result()
+        platforms: Any of "instagram", "facebook", "x" (default: Instagram only)
 
     Returns:
-        Empty string if successful, error message otherwise
+        Empty string if every platform succeeded. Otherwise the error; with
+        more than one platform, one "Platform: result" line each.
     """
-    logger.info(f"publish({thedate}) called (force={force})")
+    logger.info(f"publish({thedate}) called (force={force}, platforms={platforms})")
     if request_id:
         _publish_results[request_id] = None
     try:
-        msg = _publish(thedate, caption, force)
+        msg = _publish(thedate, caption, force, platforms)
     except Exception as e:
         logger.exception("publish() crashed")
         msg = f"Failed to publish: {e}"
@@ -1886,19 +1946,61 @@ def publish(thedate: str, caption: str, force: bool = False, request_id: str = "
     return msg
 
 
-def _publish(thedate: str, caption: str, force: bool) -> str:
+def _publish(thedate: str, caption: str, force: bool, platforms: Optional[List[str]] = None) -> str:
+    if platforms is None:
+        platforms = ["instagram"]
+    selected = [p for p in PLATFORMS if p in platforms]
+    if not selected:
+        return "Choose at least one platform to publish to"
+
     working_path = WEB_DIR / thedate
     if not working_path.is_dir():
         msg = f"Nothing to publish for {thedate} — tap Create post first"
         logger.error(msg)
         return msg
 
-    published_at = get_published_at(thedate)
-    if published_at and not force:
-        msg = f"The post for {thedate} was already published at {published_at}"
-        logger.warning(msg)
-        return msg
+    results: Dict[str, str] = {}
+    published = _read_published(working_path)
+    for platform in selected:
+        if platform in published and not force:
+            when = published[platform].get("published_at") or "an unknown time"
+            results[platform] = f"The post for {thedate} was already published at {when}"
+            logger.warning(f"{PLATFORM_LABELS[platform]}: {results[platform]}")
+    to_publish = [p for p in selected if p not in results]
+    if not to_publish:
+        return _combine_results(selected, results)
 
+    ordered_files = _prepare_post_images(thedate, working_path)
+    if isinstance(ordered_files, str):
+        return ordered_files
+
+    full_caption = _build_caption(caption, thedate)
+    publishers = {
+        "instagram": lambda: _publish_instagram(thedate, working_path, ordered_files, full_caption),
+        "facebook": lambda: _publish_facebook(thedate, working_path, ordered_files, full_caption),
+        "x": lambda: _publish_x(thedate, working_path, ordered_files, caption),
+    }
+    for platform in to_publish:
+        try:
+            results[platform] = publishers[platform]()
+        except Exception as e:
+            logger.exception(f"Publishing to {platform} crashed")
+            results[platform] = f"Failed to publish: {e}"
+    return _combine_results(selected, results)
+
+
+def _combine_results(selected: List[str], results: Dict[str, str]) -> str:
+    if len(selected) == 1:
+        return results[selected[0]]
+    if all(results[p] == "" for p in selected):
+        return ""
+    return "\n".join(
+        f"{PLATFORM_LABELS[p]}: {results[p] or 'published'}" for p in selected
+    )
+
+
+def _prepare_post_images(thedate: str, working_path: Path):
+    """The images in posting order (cover first), or an error message."""
     # Detect Easter week special days
     is_vigil = (working_path / "_order.txt").exists()
 
@@ -1916,13 +2018,6 @@ def _publish(thedate: str, caption: str, force: bool) -> str:
 
     if not is_vigil and len(cover_images) == len(all_images):
         msg = f"No reading graphics for {thedate} — tap Create post first"
-        logger.error(msg)
-        return msg
-
-    try:
-        client = login_user()
-    except Exception as e:
-        msg = f"Failed to login to Instagram: {e}"
         logger.error(msg)
         return msg
 
@@ -1944,21 +2039,28 @@ def _publish(thedate: str, caption: str, force: bool) -> str:
         ordered_reading_files = [
             working_path / f for f in order_file.read_text(encoding="utf-8").splitlines() if f.strip()
         ]
-        ordered_files = list(cover_files) + ordered_reading_files
-    else:
-        ordered_files = list(cover_files)
-        for prefix in reading_prefixes:
-            for filename in all_images:
-                if prefix in filename:
-                    ordered_files.append(working_path / filename)
+        return list(cover_files) + ordered_reading_files
 
+    ordered_files = list(cover_files)
+    for prefix in reading_prefixes:
+        for filename in all_images:
+            if prefix in filename:
+                ordered_files.append(working_path / filename)
+    return ordered_files
+
+
+def _publish_instagram(thedate: str, working_path: Path, ordered_files: List[Path], full_caption: str) -> str:
     if len(ordered_files) > MAX_CAROUSEL_IMAGES:
         msg = f"Too many images ({len(ordered_files)}) — Instagram limit is {MAX_CAROUSEL_IMAGES}"
         logger.error(msg)
         return msg
 
-    # Build caption
-    full_caption = _build_caption(caption, thedate)
+    try:
+        client = login_user()
+    except Exception as e:
+        msg = f"Failed to login to Instagram: {e}"
+        logger.error(msg)
+        return msg
 
     alt_text = {
         "custom_accessibility_caption": (
@@ -1967,7 +2069,7 @@ def _publish(thedate: str, caption: str, force: bool) -> str:
         )
     }
 
-    logger.info(f"Publishing {len(ordered_files)} images for {thedate}")
+    logger.info(f"Instagram: publishing {len(ordered_files)} images for {thedate}")
     try:
         media = client.album_upload(
             paths=[str(p) for p in ordered_files],
@@ -1993,8 +2095,42 @@ def _publish(thedate: str, caption: str, force: bool) -> str:
         logger.error(msg)
         return msg
 
-    _mark_published(working_path, media_code)
-    logger.info(f"Successfully published post for {thedate}")
+    _mark_published(working_path, "instagram", media_code)
+    logger.info(f"Instagram: published post for {thedate}")
+    return ""
+
+
+def _publish_facebook(thedate: str, working_path: Path, ordered_files: List[Path], full_caption: str) -> str:
+    logger.info(f"Facebook: publishing {len(ordered_files)} images for {thedate}")
+    try:
+        post_id = social.publish_facebook(ordered_files, full_caption)
+    except social.PublishError as e:
+        msg = f"Failed to publish: {e}"
+        logger.error(f"Facebook: {msg}")
+        return msg
+    except requests.RequestException as e:
+        msg = f"Failed to publish: {e}"
+        logger.error(f"Facebook: {msg}")
+        return msg
+    _mark_published(working_path, "facebook", post_id)
+    return ""
+
+
+def _publish_x(thedate: str, working_path: Path, ordered_files: List[Path], caption: str) -> str:
+    logger.info(f"X: publishing {len(ordered_files)} images for {thedate}")
+    try:
+        social.publish_x(
+            ordered_files,
+            caption,
+            thedate,
+            # Mark as soon as the first post is live, so a failed reply
+            # doesn't lead to the whole thread being posted again.
+            on_first_post=lambda post_id: _mark_published(working_path, "x", post_id),
+        )
+    except (social.PublishError, requests.RequestException) as e:
+        msg = f"Failed to publish: {e}"
+        logger.error(f"X: {msg}")
+        return msg
     return ""
 
 

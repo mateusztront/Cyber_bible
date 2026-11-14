@@ -34,7 +34,7 @@ uv run pytest tests/test_create_graphic.py -v
 1. **Scraping** (`create_graphic.py`): Fetches readings from `liturgia.wiara.pl`, cross-checked with `brewiarz.pl`
 2. **Processing** (`create_graphic.py`): Parses HTML, normalizes content, handles reading variants (shorter/longer versions)
 3. **Rendering** (`draw_posts.py`): PIL-based text rendering with justified alignment, automatic pagination for long readings
-4. **Publishing** (`login.py`, `create_graphic.py`): Instagram upload via instagrapi with session management
+4. **Publishing** (`login.py`, `create_graphic.py`, `social.py`): Instagram upload via instagrapi with session management; Facebook Page (Graph API) and X (API v2, OAuth 1.0a, threads of 4 images) via `social.py`. `publish(..., platforms)` runs each selected platform independently
 
 ### Key Modules
 - **`main.py`**: Eel-based desktop app entry point (Chrome/browser GUI on port 8000)
@@ -42,15 +42,16 @@ uv run pytest tests/test_create_graphic.py -v
 - **`create_graphic.py`**: Main orchestrator with `@eel.expose` functions callable from JS frontend
 - **`draw_posts.py`**: Image text rendering engine with `PageType` enum for pagination states
 - **`login.py`**: Instagram auth with session persistence and 2FA support
+- **`social.py`**: Facebook Page and X publishing (setup steps in README.md)
 
 ### Frontend
 - **`web/`**: Eel frontend (index.html, script.js) communicates with Python via `eel.draw_post()`, `eel.publish()`, etc.
-- **`web/connection.js`**: Patches eel.js so calls survive phones dropping the websocket (reconnect, fail pending calls on close, timeouts). `publish()` writes `web/{date}/_published.json` and refuses to post a date twice unless `force` is passed.
+- **`web/connection.js`**: Patches eel.js so calls survive phones dropping the websocket (reconnect, fail pending calls on close, timeouts). `publish()` writes `web/{date}/_published.json` (one entry per platform under `platforms`; top-level `published_at`/`media_code` are Instagram's, as in older markers) and refuses to post a date twice on a platform unless `force` is passed.
 - **Logs**: stdout plus `logs/app.log` (rotating). The browser reports reconnects there via `client_log()`.
 
 ### Data Flow
 ```
-liturgia.wiara.pl → scrape → parse readings dict → render images → web/{date}/*.jpg → Instagram
+liturgia.wiara.pl → scrape → parse readings dict → render images → web/{date}/*.jpg → Instagram / Facebook / X
 ```
 
 ### Reading Types
@@ -74,4 +75,6 @@ Long readings automatically paginate using font size reduction first (down to `F
 
 Copy `.env.example` to `.env` and set:
 - `INSTAGRAM_USERNAME` / `INSTAGRAM_PASSWORD` - Required for publishing
+- `FACEBOOK_PAGE_ID` / `FACEBOOK_PAGE_TOKEN` - Optional, Facebook Page publishing
+- `X_API_KEY` / `X_API_SECRET` / `X_ACCESS_TOKEN` / `X_ACCESS_TOKEN_SECRET` - Optional, X publishing (pay-per-use)
 - `ELEVENLABS_API_KEY` - Optional, for TTS features

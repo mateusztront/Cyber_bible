@@ -75,6 +75,30 @@ INSTAGRAM_LOCALE = "pl_PL"
 INSTAGRAM_TIMEZONE_OFFSET = 3600  # UTC+1 (Poland)
 
 # =============================================================================
+# FACEBOOK PAGE (Meta Graph API, from environment)
+# =============================================================================
+# FACEBOOK_PAGE_TOKEN: a Page access token with pages_manage_posts (one made
+# from a long-lived user token does not expire). See README "Facebook and X".
+
+FACEBOOK_PAGE_ID = os.getenv("FACEBOOK_PAGE_ID", "")
+FACEBOOK_PAGE_TOKEN = os.getenv("FACEBOOK_PAGE_TOKEN", "")
+FACEBOOK_GRAPH_VERSION = os.getenv("FACEBOOK_GRAPH_VERSION", "v26.0")
+
+# =============================================================================
+# X (official API v2, OAuth 1.0a user context, from environment)
+# =============================================================================
+# The four keys from the app's "Keys and tokens" page in the X developer
+# portal; the access token must have Read and Write permission.
+
+X_API_KEY = os.getenv("X_API_KEY", "")
+X_API_SECRET = os.getenv("X_API_SECRET", "")
+X_ACCESS_TOKEN = os.getenv("X_ACCESS_TOKEN", "")
+X_ACCESS_TOKEN_SECRET = os.getenv("X_ACCESS_TOKEN_SECRET", "")
+X_MAX_IMAGES_PER_POST = 4
+# Hashtags for X, where the 280-character limit leaves no room for all of DEFAULT_HASHTAGS
+X_HASHTAGS = ["#czytanianadzis", "#Biblia"]
+
+# =============================================================================
 # ELEVENLABS API (Text-to-Speech)
 # =============================================================================
 

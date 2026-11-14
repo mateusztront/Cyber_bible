@@ -673,8 +673,58 @@ async function waitForPublishResult(requestId) {
         }
         await new Promise(resolve => setTimeout(resolve, 3000));
     }
-    throw new Error('No result from the server after 15 minutes. Check Instagram before publishing again.');
+    throw new Error('No result from the server after 15 minutes. Check Instagram, Facebook and X before publishing again.');
 }
+
+// =============================================================================
+// PUBLISH PLATFORMS (Instagram / Facebook / X checkboxes)
+// =============================================================================
+
+const PLATFORM_LABELS = { instagram: 'Instagram', facebook: 'Facebook', x: 'X' };
+const PLATFORMS_STORAGE_KEY = 'cyberbible.publishPlatforms';
+
+function platformCheckboxes() {
+    return Array.from(document.querySelectorAll('#publish-platforms input[type=checkbox]'));
+}
+
+function selectedPlatforms() {
+    return platformCheckboxes().filter(cb => cb.checked && !cb.disabled).map(cb => cb.value);
+}
+
+function listPlatforms(platforms) {
+    const names = platforms.map(p => PLATFORM_LABELS[p] || p);
+    return names.length > 1 ? names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1] : names[0];
+}
+
+function savePlatformSelection() {
+    try {
+        localStorage.setItem(PLATFORMS_STORAGE_KEY, JSON.stringify(selectedPlatforms()));
+    } catch (e) { /* storage unavailable: the choice just isn't remembered */ }
+}
+
+async function initPublishPlatforms() {
+    let saved = null;
+    try {
+        saved = JSON.parse(localStorage.getItem(PLATFORMS_STORAGE_KEY) || 'null');
+    } catch (e) { /* no saved choice */ }
+
+    let available = { instagram: true, facebook: false, x: false };
+    try {
+        available = await eel.get_publish_platforms()();
+    } catch (e) {
+        console.warn('Could not check which platforms are set up:', e);
+    }
+    platformCheckboxes().forEach(cb => {
+        const ok = Boolean(available[cb.value]);
+        cb.disabled = !ok;
+        cb.parentElement.classList.toggle('unavailable', !ok);
+        cb.parentElement.title = ok ? '' : 'Not set up — add its keys to .env on the server';
+        cb.checked = ok && (Array.isArray(saved) ? saved.includes(cb.value) : true);
+        cb.onchange = savePlatformSelection;
+    });
+}
+
+document.addEventListener('DOMContentLoaded', initPublishPlatforms);
 
 document.querySelector(".publish").onclick = async function() {
     const button = this;
@@ -682,21 +732,41 @@ document.querySelector(".publish").onclick = async function() {
     const captionElement = document.getElementById('dynamicTextArea');
     const cap = captionElement ? captionElement.value : '';
 
+    let platforms = selectedPlatforms();
+    if (!platforms.length) {
+        showPublishStatus('Tick at least one platform to publish to.', 'warning');
+        return;
+    }
+
     button.disabled = true;
     try {
-        // Instagram has no undo, so publishing a date twice needs a yes
-        const publishedAt = await eel.get_published_at(thedate)();
-        const force = Boolean(publishedAt);
-        if (force && !confirm(`The post for ${thedate} was already published (${formatPublishedAt(publishedAt)}).\n\nPublish it again?`)) {
-            showPublishStatus('Not published again.', 'info');
-            return;
+        // No platform has an undo, so publishing a date twice needs a yes
+        const status = await eel.get_publish_status(thedate)();
+        const already = platforms.filter(p => status[p]);
+        let force = false;
+        if (already.length) {
+            const when = already.map(p => `${PLATFORM_LABELS[p]}: ${formatPublishedAt(status[p])}`).join('\n');
+            if (already.length === platforms.length) {
+                if (!confirm(`The post for ${thedate} was already published:\n${when}\n\nPublish it again?`)) {
+                    showPublishStatus('Not published again.', 'info');
+                    return;
+                }
+                force = true;
+            } else {
+                const rest = platforms.filter(p => !status[p]);
+                force = confirm(
+                    `The post for ${thedate} was already published:\n${when}\n\n` +
+                    `OK = publish there again too\nCancel = publish only to ${listPlatforms(rest)}`
+                );
+                if (!force) platforms = rest;
+            }
         }
 
-        showPublishStatus('Publishing… keep this page open until it finishes.', 'info');
+        showPublishStatus(`Publishing to ${listPlatforms(platforms)}… keep this page open until it finishes.`, 'info');
         const requestId = Date.now().toString(36) + Math.random().toString(36).slice(2);
         let publish_answer;
         try {
-            publish_answer = await eel.publish(thedate, cap, force, requestId)();
+            publish_answer = await eel.publish(thedate, cap, force, requestId, platforms)();
         } catch (error) {
             console.warn('Publish reply lost:', error);
             showPublishStatus('Connection lost while publishing. Checking the result on the server…', 'warning');
@@ -704,9 +774,12 @@ document.querySelector(".publish").onclick = async function() {
         }
 
         const ok = !publish_answer;
+        // With several platforms the answer has one "Platform: result" line each
+        const partial = !ok && platforms.length > 1 && /: published$/m.test(publish_answer);
         showPublishStatus(
-            ok ? 'Published successfully!' : 'Publication failed:\n' + publish_answer,
-            ok ? 'success' : 'error'
+            ok ? `Published to ${listPlatforms(platforms)}!`
+               : (partial ? 'Published only partly:\n' : 'Publication failed:\n') + publish_answer,
+            ok ? 'success' : (partial ? 'warning' : 'error')
         );
         playNotificationSound(ok ? 'complete' : 'error');
     } catch (error) {

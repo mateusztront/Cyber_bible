@@ -155,6 +155,23 @@
         background-color: #fff3e0;
         color: #ef6c00;
       }
+      #publish-platforms {
+        align-items: center;
+        gap: 14px;
+      }
+      #publish-platforms label {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        cursor: pointer;
+      }
+      #publish-platforms label.unavailable {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      #publish-status .status-message {
+        white-space: pre-line;
+      }
       #publish-status .status-message {
         white-space: pre-wrap;
       }
@@ -449,6 +466,12 @@
     <div class="controls">
       <button class="posts">Create post</button>
       <button class="publish">Publish</button>
+    </div>
+    <div class="controls" id="publish-platforms">
+      <span>Publish to:</span>
+      <label><input type="checkbox" value="instagram" checked /> Instagram</label>
+      <label><input type="checkbox" value="facebook" /> Facebook</label>
+      <label><input type="checkbox" value="x" /> X</label>
     </div>
     <div id="publish-status"></div>
 
