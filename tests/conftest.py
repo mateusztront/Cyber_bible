@@ -129,3 +129,15 @@ def temp_web_dir(tmp_path):
     web_dir = tmp_path / "web"
     web_dir.mkdir()
     return web_dir
+
+
+@pytest.fixture(autouse=True)
+def _clear_scrape_cache():
+    """Scraped pages are cached per date for a few minutes; tests must not share them."""
+    import create_graphic
+
+    create_graphic._content_cache.clear()
+    create_graphic._brewiarz_cache.clear()
+    yield
+    create_graphic._content_cache.clear()
+    create_graphic._brewiarz_cache.clear()

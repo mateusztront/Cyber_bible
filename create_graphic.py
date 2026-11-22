@@ -9,6 +9,7 @@ import logging
 import math
 import os
 import re
+import time
 from datetime import datetime
 from functools import reduce
 from pathlib import Path
@@ -138,17 +139,74 @@ def _extract_vigil_page_nums(idx_div) -> set:
     return page_nums
 
 
+# liturgia.wiara.pl sometimes answers slowly or not at all for a while, so
+# every page is tried a few times before giving up.
+LITURGY_FETCH_ATTEMPTS = 3
+LITURGY_FETCH_TIMEOUT = 20
+LITURGY_RETRY_DELAYS = (2, 5)  # seconds before the 2nd and 3rd attempt
+LITURGY_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/130.0 Safari/537.36",
+    "Accept-Language": "pl,en;q=0.8",
+}
+
+# One Load Readings asks for the same date several times (first-reading
+# options, cover list, one tab per reading), so a scraped page is reused for a
+# few minutes instead of being downloaded again each time.
+CONTENT_CACHE_SECONDS = 10 * 60
+_content_cache: Dict[str, tuple] = {}
+
+
+class ReadingsUnavailable(Exception):
+    """liturgia.wiara.pl couldn't be reached or had no readings; message is for the user."""
+
+
+def _fetch_liturgy_page(url: str) -> requests.Response:
+    """GET a liturgia.wiara.pl page, retrying timeouts, dropped connections and 5xx."""
+    last_error: Optional[Exception] = None
+    for attempt in range(LITURGY_FETCH_ATTEMPTS):
+        if attempt:
+            time.sleep(LITURGY_RETRY_DELAYS[min(attempt - 1, len(LITURGY_RETRY_DELAYS) - 1)])
+        try:
+            response = requests.get(url, timeout=LITURGY_FETCH_TIMEOUT, headers=LITURGY_HEADERS)
+        except requests.RequestException as e:
+            last_error = e
+            logger.warning(f"{url}: attempt {attempt + 1}/{LITURGY_FETCH_ATTEMPTS} failed: {e}")
+            continue
+        if response.status_code >= 500 or response.status_code == 429:
+            last_error = requests.HTTPError(f"HTTP {response.status_code}", response=response)
+            logger.warning(f"{url}: attempt {attempt + 1}/{LITURGY_FETCH_ATTEMPTS} got HTTP {response.status_code}")
+            continue
+        response.raise_for_status()
+        return response
+    raise ReadingsUnavailable(
+        f"liturgia.wiara.pl didn't answer after {LITURGY_FETCH_ATTEMPTS} tries ({last_error}). "
+        "Try again in a minute."
+    )
+
+
 def _scrape_content_list(thedate: str) -> List[str]:
+    """Raw content lines for a date (cached for a few minutes; see _content_cache)."""
+    cached = _content_cache.get(thedate)
+    if cached and time.monotonic() - cached[0] < CONTENT_CACHE_SECONDS:
+        return list(cached[1])
+    content_list = _download_content_list(thedate)
+    _content_cache[thedate] = (time.monotonic(), list(content_list))
+    return content_list
+
+
+def _download_content_list(thedate: str) -> List[str]:
     """Fetch raw content list for a given date, handling paginated vigil pages."""
     url = f"{LITURGY_URL_PL}/{thedate}"
-    response = requests.get(url, timeout=30)
-    response.raise_for_status()
+    response = _fetch_liturgy_page(url)
 
     soup = BeautifulSoup(response.content, "html.parser")
     content_areas = soup.find_all("div", "txt__rich-area")
 
     if len(content_areas) < 2:
-        raise ValueError("Could not find reading content on page")
+        raise ReadingsUnavailable(
+            f"No readings found on liturgia.wiara.pl for {thedate} — the page layout may have changed"
+        )
 
     # Check for vigil pagination (content_index div with sub-page links)
     idx_div = soup.find("div", "content_index")
@@ -160,8 +218,7 @@ def _scrape_content_list(thedate: str) -> List[str]:
             combined: List[str] = []
             for page_num in sorted(page_nums):
                 page_url = f"{LITURGY_URL_PL}/{thedate}/{page_num}"
-                page_resp = requests.get(page_url, timeout=30)
-                page_resp.raise_for_status()
+                page_resp = _fetch_liturgy_page(page_url)
                 page_soup = BeautifulSoup(page_resp.content, "html.parser")
                 page_areas = page_soup.find_all("div", "txt__rich-area")
                 if len(page_areas) >= 2:
@@ -748,13 +805,14 @@ def _has_alternative_first_reading(thedate: str, content_dic: Dict[str, List[str
         day = datetime.strptime(thedate, "%Y-%m-%d")
     except ValueError:
         return False
+    if day.weekday() == 6:
+        return False  # Sunday Mass always has a second reading
 
     has_second = _brewiarz_has_second_reading(thedate)
     if has_second is not None:
         return not has_second
 
-    is_sunday = day.weekday() == 6
-    return not is_sunday and day.strftime("%m-%d") in FEASTS_WITH_ALTERNATIVE_FIRST_READING
+    return day.strftime("%m-%d") in FEASTS_WITH_ALTERNATIVE_FIRST_READING
 
 
 def _apply_first_reading_choice(
@@ -2206,13 +2264,21 @@ def get_readings_for_cover(thedate: str, first_reading_choice: int = 0) -> Dict[
         logger.info(f"get_readings_for_cover({thedate}) -> {list(content_dic.keys())}")
 
         # Return preview (first few lines) of each reading
-        return {
+        readings = {
             name: " ".join(text[:3])[:200] + "..."
             for name, text in content_dic.items()
         }
-    except Exception as e:
+    except ReadingsUnavailable as e:
         logger.error(f"Failed to get readings for cover: {e}")
-        return {}
+        raise
+    except Exception as e:
+        logger.exception("Failed to get readings for cover")
+        # Raised to the page (the promise rejects with this text) instead of
+        # an empty list, which looked like "loaded, but no readings".
+        raise ReadingsUnavailable(f"Couldn't read the readings for {thedate}: {e}") from e
+    if not readings:
+        raise ReadingsUnavailable(f"No readings found for {thedate}")
+    return readings
 
 
 @eel.expose

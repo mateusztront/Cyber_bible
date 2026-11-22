@@ -336,7 +336,9 @@ document.getElementById('load-readings-btn').onclick = async function() {
 
     } catch (error) {
         console.error('Error loading readings:', error);
-        showStatus('Error loading readings. Check console for details.', 'error');
+        // Python errors arrive as the error text itself, lost connections as Error objects
+        const detail = (error && (error.message || error.errorText)) || String(error || '');
+        showStatus('Could not load readings: ' + (detail || 'unknown error'), 'error');
     }
 };
 
