@@ -121,6 +121,40 @@ class MidjourneyApi:
 
         raise TimeoutError(f"Upscale timed out after {timeout}s")
 
+    def vary(self, message_id: str, custom_id: str, prompt: str, timeout: int = 240) -> dict:
+        """
+        Click "Vary (Subtle)" or "Vary (Strong)" on an upscaled image and wait
+        for the new 4-image grid.
+
+        Midjourney echoes the original prompt in the new grid's message
+        ("<prompt> - Variations (Strong) by @user"), so it is matched the same
+        way as /imagine: by prompt, created after the click, finished.
+
+        With Remix mode on, the click opens a prompt editor in Discord instead
+        of generating anything, which ends in a timeout here.
+        """
+        logger.info(f"Varying with button: {custom_id[:40]}...")
+        start_timestamp = time.time()
+        self._click_button(message_id, custom_id)
+
+        while time.time() - start_timestamp < timeout:
+            time.sleep(10)
+            try:
+                result = self._get_matching_midjourney_message(
+                    prompt, start_timestamp, exclude_ids={message_id}
+                )
+                if result and self._is_generation_complete(result):
+                    logger.info("Variation grid complete")
+                    return result
+            except Exception as e:
+                logger.warning(f"Error checking variation: {e}")
+
+        raise TimeoutError(
+            f"Variation timed out after {timeout}s. If Remix mode is on in your "
+            "Midjourney settings (/settings), turn it off: with Remix, Vary waits "
+            "for you to edit the prompt in Discord."
+        )
+
     def upscale_random(self, message_id: str, components: list, timeout: int = 90) -> dict:
         """
         Randomly select and click one of the U1-U4 upscale buttons.
@@ -257,7 +291,9 @@ class MidjourneyApi:
 
         return messages[0] if messages else None
 
-    def _get_matching_midjourney_message(self, prompt: str, after_timestamp: float) -> dict | None:
+    def _get_matching_midjourney_message(
+        self, prompt: str, after_timestamp: float, exclude_ids: set | None = None
+    ) -> dict | None:
         """
         Get Midjourney message that matches our prompt and was created after timestamp.
 
@@ -291,6 +327,9 @@ class MidjourneyApi:
             msg_timestamp = self._parse_discord_timestamp(msg.get("timestamp", ""))
             if msg_timestamp < after_timestamp:
                 logger.debug(f"Skipping message - too old: {msg.get('id')}")
+                continue
+
+            if exclude_ids and msg.get("id") in exclude_ids:
                 continue
 
             # Must contain our prompt keywords in message content

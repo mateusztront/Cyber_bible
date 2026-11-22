@@ -43,6 +43,7 @@ uv run pytest tests/test_create_graphic.py -v
 - **`draw_posts.py`**: Image text rendering engine with `PageType` enum for pagination states
 - **`login.py`**: Instagram auth with session persistence and 2FA support
 - **`social.py`**: Facebook Page and X publishing (setup steps in README.md)
+- **`cover_history.py`**: per-day Midjourney history in `web/{date}/_cover_history/` (grids + upscaled images with lineage, `history.json`). Upscaling makes an image the cover (`web/{date}/mateusztront.jpg`); any history image can be made the cover again; Vary (Subtle/Strong) on an image clicks the button saved from its upscale message (`MidjourneyApi.vary`, fails with a timeout if Remix mode is on). A successful publish of date D deletes the histories of all days before D.
 
 ### Frontend
 - **`web/`**: Eel frontend (index.html, script.js) communicates with Python via `eel.draw_post()`, `eel.publish()`, etc.

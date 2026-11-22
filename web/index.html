@@ -155,6 +155,68 @@
         background-color: #fff3e0;
         color: #ef6c00;
       }
+      .cover-history {
+        margin-top: 20px;
+      }
+      .cover-history h3 {
+        margin: 0 0 4px;
+      }
+      .history-hint {
+        margin: 0 0 12px;
+        font-size: 0.9em;
+        opacity: 0.75;
+      }
+      .history-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        gap: 12px;
+      }
+      .history-card {
+        border: 2px solid #ddd;
+        border-radius: 8px;
+        padding: 6px;
+        background: #fff;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .history-card.is-cover {
+        border-color: #2d5a27;
+        box-shadow: 0 0 0 2px rgba(45, 90, 39, 0.25);
+      }
+      .history-card img {
+        width: 100%;
+        aspect-ratio: 1 / 1;
+        object-fit: cover;
+        border-radius: 4px;
+        cursor: zoom-in;
+      }
+      .history-label {
+        font-size: 0.8em;
+        line-height: 1.3;
+      }
+      .history-label strong {
+        display: block;
+      }
+      .history-badge {
+        display: inline-block;
+        background: #2d5a27;
+        color: #fff;
+        border-radius: 4px;
+        padding: 0 5px;
+        font-size: 0.85em;
+        margin-left: 4px;
+      }
+      .history-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+      }
+      .history-actions button {
+        flex: 1 1 auto;
+        padding: 6px 6px;
+        font-size: 0.8em;
+      }
       #publish-platforms {
         align-items: center;
         gap: 14px;
@@ -444,6 +506,16 @@
       </div>
 
       <img id="cover-preview" style="display: none;" />
+
+      <!-- Every grid and image made for this day; any image can become the cover -->
+      <div id="cover-history" class="cover-history" hidden>
+        <h3>Images for this day</h3>
+        <p class="history-hint">
+          Vary any image to get 4 new ones based on it, or pick another one from an earlier grid.
+          A new prompt starts a new chain. Kept until the next day is published.
+        </p>
+        <div id="cover-history-list" class="history-list"></div>
+      </div>
     </div>
 
     <!-- Reading Display Section (editable - used as publication caption) -->

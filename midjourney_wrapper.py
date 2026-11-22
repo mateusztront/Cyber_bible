@@ -159,6 +159,55 @@ class MidjourneyWrapper:
         return self.client.download_image(image_url, save_path)
 
 
+    def upscale(self, message_id: str, custom_id: str) -> dict:
+        """Click U1-U4 on a grid and return Midjourney's upscale message."""
+        self._rate_limit_delay()
+        return self.client.upscale(message_id, custom_id)
+
+    def vary(self, message_id: str, custom_id: str, prompt: str) -> dict:
+        """Click Vary (Subtle/Strong) on an upscaled image; returns the new grid message."""
+        self._rate_limit_delay()
+        return self.client.vary(message_id, custom_id, prompt)
+
+    def download(self, image_url: str, save_path: Path) -> Path:
+        return self.client.download_image(image_url, save_path)
+
+
+def _buttons(components: list):
+    for row in components or []:
+        for button in row.get("components", []) if isinstance(row, dict) else []:
+            yield button
+
+
+def extract_upscale_buttons(components: list) -> dict:
+    """U1-U4 label -> custom_id from a grid message."""
+    return {
+        b["label"]: b.get("custom_id", "")
+        for b in _buttons(components)
+        if b.get("label") in ("U1", "U2", "U3", "U4")
+    }
+
+
+def extract_vary_buttons(components: list) -> dict:
+    """
+    "subtle"/"strong" -> custom_id from an upscaled image message.
+    Buttons are labelled "Vary (Subtle)" / "Vary (Strong)"; their custom_ids
+    contain low_variation / high_variation, which is checked too in case the
+    labels change.
+    """
+    found = {}
+    for b in _buttons(components):
+        label = (b.get("label") or "").lower()
+        custom_id = b.get("custom_id") or ""
+        if "region" in label or "inpaint" in custom_id.lower():
+            continue
+        if ("vary" in label and "subtle" in label) or "low_variation" in custom_id:
+            found.setdefault("subtle", custom_id)
+        elif ("vary" in label and "strong" in label) or "high_variation" in custom_id:
+            found.setdefault("strong", custom_id)
+    return found
+
+
 def generate_cover_image(
     prompt: str,
     output_dir: Path,

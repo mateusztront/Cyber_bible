@@ -49,7 +49,8 @@ from draw_posts import (
 )
 from login import login_user
 import social
-from midjourney_wrapper import MidjourneyWrapper
+from midjourney_wrapper import MidjourneyWrapper, extract_upscale_buttons, extract_vary_buttons
+import cover_history
 from prompt_generator import generate_midjourney_prompt, generate_prompt_variations
 
 logger = logging.getLogger(__name__)
@@ -2044,6 +2045,13 @@ def _publish(thedate: str, caption: str, force: bool, platforms: Optional[List[s
         except Exception as e:
             logger.exception(f"Publishing to {platform} crashed")
             results[platform] = f"Failed to publish: {e}"
+
+    if any(results[p] == "" for p in to_publish):
+        # This day is out, so earlier days' cover histories are no longer needed
+        try:
+            cover_history.prune_before(WEB_DIR, thedate)
+        except Exception as e:
+            logger.warning(f"Could not clean up old cover histories: {e}")
     return _combine_results(selected, results)
 
 
@@ -2359,46 +2367,38 @@ def check_cover_exists(thedate: str) -> bool:
     return cover_path.exists()
 
 
-def _extract_upscale_buttons(components: list) -> dict:
-    """Extract U1-U4 button custom_ids from Midjourney response components."""
-    buttons = {}
-    for row in components:
-        if "components" in row:
-            for button in row["components"]:
-                label = button.get("label", "")
-                if label in ["U1", "U2", "U3", "U4"]:
-                    buttons[label] = button.get("custom_id", "")
-    return buttons
+# =============================================================================
+# COVER HISTORY: grids, upscales and variations kept per day (cover_history.py)
+# =============================================================================
+
+
+def _grid_reply(thedate: str, grid: dict) -> dict:
+    """What the page needs to show a grid and upscale from it."""
+    return {
+        "grid_id": grid["id"],
+        "grid_url": f"/{thedate}/{cover_history.HISTORY_DIRNAME}/{grid['file']}",
+        "message_id": grid["message_id"],
+        "buttons": grid.get("buttons", {}),
+    }
 
 
 @eel.expose
 def generate_cover_grid(thedate: str, prompt: str) -> dict:
     """
-    Generate 4-image grid via Midjourney without upscaling.
-
-    Returns dict with grid_url, message_id, and buttons for user selection.
+    Generate a 4-image grid from a prompt (starts a new chain in the day's
+    history). Returns grid_id, grid_url, message_id and the U1-U4 buttons.
     """
     try:
         logger.info(f"Generating grid for {thedate} with prompt: {prompt[:50]}...")
-
-        output_path = WEB_DIR / thedate
-        output_path.mkdir(parents=True, exist_ok=True)
-
         mj = MidjourneyWrapper()
         result = mj.generate_grid(prompt)
-
-        grid_url = result.get("attachments", [{}])[0].get("url", "")
-        message_id = result.get("id", "")
-        buttons = _extract_upscale_buttons(result.get("components", []))
-
-        logger.info(f"Grid generated: {grid_url[:50]}...")
-
-        return {
-            "grid_url": grid_url,
-            "message_id": message_id,
-            "buttons": buttons,
-        }
-
+        grid = cover_history.add_grid(
+            WEB_DIR, thedate, result, prompt,
+            extract_upscale_buttons(result.get("components", [])),
+            download=mj.download, source="prompt",
+        )
+        logger.info(f"Grid #{grid['id']} saved for {thedate}")
+        return _grid_reply(thedate, grid)
     except Exception as e:
         logger.error(f"Failed to generate grid: {e}")
         return {"error": str(e)}
@@ -2407,31 +2407,82 @@ def generate_cover_grid(thedate: str, prompt: str) -> dict:
 @eel.expose
 def upscale_cover(thedate: str, message_id: str, custom_id: str) -> str:
     """
-    Upscale selected variant and save as cover image.
-
-    Args:
-        thedate: Date for output directory
-        message_id: Discord message ID from generate_cover_grid
-        custom_id: Button custom_id for selected variant (U1-U4)
-
-    Returns:
-        Path to saved image or error message
+    Upscale one image of a grid (from the history), save it in the history and
+    make it the cover. Returns the cover's path, or "Error: ...".
     """
     try:
         logger.info(f"Upscaling variant for {thedate}...")
-
-        output_path = WEB_DIR / thedate
-        output_path.mkdir(parents=True, exist_ok=True)
-        save_path = output_path / "mateusztront.jpg"
+        data = cover_history.load(WEB_DIR, thedate)
+        grid = cover_history.grid_for_message(data, message_id)
+        if grid is None:
+            return "Error: this grid isn't in the day's history anymore"
+        variant = next((k for k, v in grid.get("buttons", {}).items() if v == custom_id), "U?")
 
         mj = MidjourneyWrapper()
-        mj.upscale_variant(message_id, custom_id, save_path)
-
-        logger.info(f"Cover upscaled: {save_path}")
-        return f"/{thedate}/mateusztront.jpg"
-
+        result = mj.upscale(message_id, custom_id)
+        image = cover_history.add_image(
+            WEB_DIR, thedate, grid["id"], variant, result,
+            extract_vary_buttons(result.get("components", [])),
+            download=mj.download,
+        )
+        if not image["vary"]:
+            logger.warning(f"No Vary buttons on Midjourney's upscale of grid #{grid['id']}")
+        logger.info(f"Cover upscaled: #{image['id']} ({variant} of grid #{grid['id']})")
+        return f"/{thedate}/{cover_history.COVER_FILENAME}"
     except Exception as e:
         logger.error(f"Failed to upscale: {e}")
+        return f"Error: {e}"
+
+
+@eel.expose
+def vary_cover(thedate: str, image_id: int, strength: str) -> dict:
+    """
+    Midjourney "Vary (Subtle)" / "Vary (Strong)" on a history image: a new
+    grid made from it, added to the history. Same reply as generate_cover_grid.
+    """
+    try:
+        if strength not in ("subtle", "strong"):
+            return {"error": f"Unknown variation strength: {strength}"}
+        data = cover_history.load(WEB_DIR, thedate)
+        image = cover_history.get_item(data, image_id, "image")
+        custom_id = image.get("vary", {}).get(strength)
+        if not custom_id:
+            return {"error": f"Midjourney gave no Vary ({strength}) button for #{image_id}"}
+
+        logger.info(f"Vary ({strength}) of #{image_id} for {thedate}...")
+        mj = MidjourneyWrapper()
+        result = mj.vary(image["message_id"], custom_id, image.get("prompt", ""))
+        grid = cover_history.add_grid(
+            WEB_DIR, thedate, result, image.get("prompt", ""),
+            extract_upscale_buttons(result.get("components", [])),
+            download=mj.download, source=strength, parent=image["id"],
+        )
+        logger.info(f"Grid #{grid['id']} = Vary ({strength}) of #{image_id}")
+        return _grid_reply(thedate, grid)
+    except Exception as e:
+        logger.error(f"Failed to vary: {e}")
+        return {"error": str(e)}
+
+
+@eel.expose
+def get_cover_history(thedate: str) -> dict:
+    """The day's grids and images, newest first, and which image is the cover."""
+    try:
+        return cover_history.view(WEB_DIR, thedate)
+    except Exception as e:
+        logger.error(f"Failed to read cover history: {e}")
+        return {"items": [], "cover": None, "error": str(e)}
+
+
+@eel.expose
+def use_history_cover(thedate: str, image_id: int) -> str:
+    """Make any image from the day's history the cover. Returns its path or "Error: ..."."""
+    try:
+        cover_history.set_cover(WEB_DIR, thedate, image_id)
+        logger.info(f"Cover for {thedate} set to history #{image_id}")
+        return f"/{thedate}/{cover_history.COVER_FILENAME}"
+    except Exception as e:
+        logger.error(f"Failed to set cover: {e}")
         return f"Error: {e}"
 
 

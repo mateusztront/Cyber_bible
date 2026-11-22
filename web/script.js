@@ -310,6 +310,7 @@ document.getElementById('load-readings-btn').onclick = async function() {
             document.getElementById('cover-preview').style.display = 'block';
         }
 
+        refreshCoverHistory(thedate);
         await loadFirstReadingOptions(thedate);
         currentReadings = await eel.get_readings_for_cover(thedate, firstReadingChoice())();
 
@@ -389,6 +390,7 @@ function resetForNewDate() {
     if (variationsContainer) variationsContainer.style.display = 'none';
 
     hideFirstReadingChoice();
+    refreshCoverHistory();
 
     showStatus('Reset complete. Select a new date and load readings.', 'info');
 }
@@ -401,6 +403,7 @@ function shiftDate(days) {
     current.setDate(current.getDate() + days);
     input.value = current.toISOString().slice(0, 10);
     hideFirstReadingChoice();
+    refreshCoverHistory();
 }
 document.getElementById('prev-date-btn').onclick = () => shiftDate(-1);
 document.getElementById('next-date-btn').onclick = () => shiftDate(1);
@@ -537,16 +540,8 @@ document.getElementById('generate-cover-btn').onclick = async function() {
             return;
         }
 
-        // Store grid data for upscale
-        currentGridData = {
-            messageId: result.message_id,
-            buttons: result.buttons,
-            thedate: thedate
-        };
-
-        // Show the grid
-        document.getElementById('grid-image').src = result.grid_url;
-        document.getElementById('grid-preview-container').style.display = 'block';
+        showGrid(thedate, result);
+        refreshCoverHistory(thedate);
 
         showStatus('Click on the image (1-4) you want to use as cover.', 'success');
         this.disabled = false;
@@ -590,10 +585,10 @@ document.querySelectorAll('.grid-quadrant').forEach(quadrant => {
 
             // Hide grid, show final cover
             document.getElementById('grid-preview-container').style.display = 'none';
-            document.getElementById('cover-preview').src = result + '?t=' + Date.now();
-            document.getElementById('cover-preview').style.display = 'block';
+            showCoverPreview(result);
 
-            showStatus('Cover image saved!', 'success');
+            showStatus('Cover image saved! Vary it or pick another below.', 'success');
+            refreshCoverHistory(currentGridData.thedate);
             currentGridData = null;
 
         } catch (error) {
@@ -602,6 +597,161 @@ document.querySelectorAll('.grid-quadrant').forEach(quadrant => {
         }
     };
 });
+
+
+// =============================================================================
+// COVER HISTORY (every grid and image made for the selected day)
+// =============================================================================
+
+let coverHistoryBusy = false;
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text == null ? '' : String(text);
+    return div.innerHTML;
+}
+
+// Show a grid (new, varied, or reopened from the history) for picking 1-4
+function showGrid(thedate, grid) {
+    currentGridData = {
+        messageId: grid.message_id,
+        buttons: grid.buttons || {},
+        thedate: thedate,
+        gridId: grid.grid_id
+    };
+    document.getElementById('grid-image').src = grid.grid_url;
+    const container = document.getElementById('grid-preview-container');
+    container.style.display = 'block';
+    container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function showCoverPreview(path) {
+    const preview = document.getElementById('cover-preview');
+    preview.src = path + '?t=' + Date.now();
+    preview.style.display = 'block';
+}
+
+function historyLabel(item) {
+    if (item.type === 'grid') {
+        const origin = item.source === 'prompt'
+            ? 'new prompt'
+            : `Vary ${item.source} of #${item.parent}`;
+        const picked = Object.entries(item.picked || {})
+            .map(([variant, id]) => `${variant}→#${id}`).join(', ');
+        return `<strong>#${item.id} · grid</strong>${escapeHtml(origin)}` +
+               (picked ? `<br>picked: ${escapeHtml(picked)}` : '');
+    }
+    return `<strong>#${item.id}</strong>${escapeHtml(item.variant)} from grid #${item.grid}`;
+}
+
+function setHistoryButtonsDisabled(disabled) {
+    document.querySelectorAll('#cover-history-list button').forEach(b => { b.disabled = disabled; });
+}
+
+async function refreshCoverHistory(thedate) {
+    thedate = thedate || document.getElementById('input_date').value;
+    const box = document.getElementById('cover-history');
+    const list = document.getElementById('cover-history-list');
+    if (!thedate) { box.hidden = true; return; }
+
+    let history;
+    try {
+        history = await eel.get_cover_history(thedate)();
+    } catch (e) {
+        console.warn('Could not load cover history:', e);
+        return;
+    }
+    if (thedate !== document.getElementById('input_date').value) return;  // date changed meanwhile
+
+    const items = (history && history.items) || [];
+    list.innerHTML = '';
+    box.hidden = items.length === 0;
+
+    items.forEach(item => {
+        const card = document.createElement('div');
+        card.className = 'history-card' + (item.type === 'image' && item.id === history.cover ? ' is-cover' : '');
+        card.title = item.prompt || '';
+
+        const img = document.createElement('img');
+        img.loading = 'lazy';
+        img.src = item.url;
+        img.alt = `#${item.id}`;
+        img.onclick = () => window.open(item.url, '_blank');
+        card.appendChild(img);
+
+        const label = document.createElement('div');
+        label.className = 'history-label';
+        label.innerHTML = historyLabel(item) +
+            (item.type === 'image' && item.id === history.cover ? '<span class="history-badge">cover</span>' : '');
+        card.appendChild(label);
+
+        const actions = document.createElement('div');
+        actions.className = 'history-actions';
+        const addButton = (text, handler, secondary = true, enabled = true) => {
+            const b = document.createElement('button');
+            b.textContent = text;
+            if (secondary) b.className = 'secondary';
+            b.disabled = coverHistoryBusy || !enabled;
+            b.onclick = handler;
+            actions.appendChild(b);
+        };
+
+        if (item.type === 'grid') {
+            addButton('Pick from this grid', () => {
+                showGrid(thedate, {
+                    grid_id: item.id, grid_url: item.url,
+                    message_id: item.message_id, buttons: item.buttons
+                });
+                showStatus(`Grid #${item.id}: click the image (1-4) to upscale.`, 'info', false);
+            });
+        } else {
+            if (item.id !== history.cover) {
+                addButton('Use as cover', () => useHistoryCover(thedate, item.id), false);
+            }
+            const canVary = item.can_vary || {};
+            addButton('Vary subtle', () => varyHistoryImage(thedate, item.id, 'subtle'), true, canVary.subtle);
+            addButton('Vary strong', () => varyHistoryImage(thedate, item.id, 'strong'), true, canVary.strong);
+        }
+        card.appendChild(actions);
+        list.appendChild(card);
+    });
+}
+
+async function useHistoryCover(thedate, imageId) {
+    const result = await eel.use_history_cover(thedate, imageId)();
+    if (result.startsWith('Error:')) {
+        showStatus(result, 'error');
+        return;
+    }
+    showCoverPreview(result);
+    showStatus(`#${imageId} is now the cover. Publish will use it.`, 'success');
+    refreshCoverHistory(thedate);
+}
+
+async function varyHistoryImage(thedate, imageId, strength) {
+    if (coverHistoryBusy) return;
+    coverHistoryBusy = true;
+    setHistoryButtonsDisabled(true);
+    showLoading(`Vary (${strength}) of #${imageId} via Midjourney… this may take 1-2 minutes.`);
+    try {
+        const result = await eel.vary_cover(thedate, imageId, strength)();
+        if (result.error) {
+            showStatus('Error: ' + result.error, 'error');
+            return;
+        }
+        showGrid(thedate, result);
+        showStatus(`Grid #${result.grid_id} (Vary ${strength} of #${imageId}): click the image (1-4) you want.`, 'success');
+    } catch (error) {
+        console.error('Error varying:', error);
+        showStatus('Error varying: ' + ((error && error.message) || error), 'error');
+    } finally {
+        coverHistoryBusy = false;
+        refreshCoverHistory(thedate);
+    }
+}
+
+document.getElementById('input_date').addEventListener('change', () => refreshCoverHistory());
+document.addEventListener('DOMContentLoaded', () => setTimeout(() => refreshCoverHistory(), 0));
 
 // =============================================================================
 // EXISTING FUNCTIONS
